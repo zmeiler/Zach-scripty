@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 if ! command -v javac >/dev/null 2>&1; then
   echo "javac not found. Install JDK 21 and ensure javac is on PATH."
   exit 1
@@ -12,6 +14,12 @@ mkdir -p build/shared build/server build/client
 find src/rpgshared -name "*.java" > build/shared-sources.txt
 find src/rpgserver -name "*.java" > build/server-sources.txt
 find src/rpgclient -name "*.java" > build/client-sources.txt
+for source_list in build/shared-sources.txt build/server-sources.txt build/client-sources.txt; do
+  if [[ ! -s "$source_list" ]]; then
+    echo "Failed to generate $source_list. Ensure the src folder is present."
+    exit 1
+  fi
+done
 javac --release 21 -encoding UTF-8 -d build/shared @build/shared-sources.txt
 javac --release 21 -encoding UTF-8 -cp build/shared -d build/server @build/server-sources.txt
 javac --release 21 -encoding UTF-8 -cp build/shared -d build/client @build/client-sources.txt

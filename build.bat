@@ -1,5 +1,6 @@
 @echo off
 setlocal EnableExtensions
+pushd "%~dp0"
 if not exist build mkdir build
 if not exist build\shared mkdir build\shared
 if not exist build\server mkdir build\server
@@ -18,6 +19,13 @@ del /q build\shared-sources.txt build\server-sources.txt build\client-sources.tx
 for /r src\rpgshared %%f in (*.java) do echo %%f>> build\shared-sources.txt
 for /r src\rpgserver %%f in (*.java) do echo %%f>> build\server-sources.txt
 for /r src\rpgclient %%f in (*.java) do echo %%f>> build\client-sources.txt
+for %%f in (build\shared-sources.txt build\server-sources.txt build\client-sources.txt) do (
+  if not exist %%f (
+    echo Failed to generate %%f. Ensure the src folder is present.
+    popd
+    exit /b 1
+  )
+)
 javac --release 21 -encoding UTF-8 -d build\shared @build\shared-sources.txt
 if errorlevel 1 exit /b 1
 javac --release 21 -encoding UTF-8 -cp build\shared -d build\server @build\server-sources.txt
@@ -37,4 +45,5 @@ echo Main-Class: rpgclient.RpgClientApp> build\client.mf
 jar cfm build\server.jar build\server.mf -C build\shared . -C build\server .
 jar cfm build\client.jar build\client.mf -C build\shared . -C build\client .
 echo Built build\server.jar and build\client.jar
+popd
 endlocal
