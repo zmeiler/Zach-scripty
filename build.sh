@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
+if ! command -v javac >/dev/null 2>&1; then
+  echo "javac not found. Install JDK 21 and ensure javac is on PATH."
+  exit 1
+fi
+if ! command -v jar >/dev/null 2>&1; then
+  echo "jar not found. Install JDK 21 and ensure jar is on PATH."
+  exit 1
+fi
 mkdir -p build/shared build/server build/client
 find src/rpgshared -name "*.java" > build/shared-sources.txt
 find src/rpgserver -name "*.java" > build/server-sources.txt

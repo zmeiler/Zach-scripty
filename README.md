@@ -31,7 +31,7 @@ The build outputs:
 - `build/server.jar`
 - `build/client.jar`
 
-If the JARs are missing, re-run the build after ensuring JDK 21 (javac + jar) is on your PATH and delete any old `build/*-sources.txt` files so the source list is fresh.
+If the JARs are missing, re-run the build after ensuring JDK 21 (javac + jar) is on your PATH (not just a JRE) and delete any old `build/*-sources.txt` files so the source list is fresh.
 
 ## Run Multiplayer (Local)
 Start the server in one terminal:
