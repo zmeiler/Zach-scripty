@@ -1,0 +1,22 @@
+{
+  "pa-rise-carlisle-carlisle": {
+    "provider": "generic",
+    "crawl_interval_seconds": 20,
+    "provider_config": {
+      "catalog_endpoint": "https://replace-with-api.example.com/catalog",
+      "prices_endpoint": "https://replace-with-api.example.com/prices",
+      "reviews_endpoint": "https://replace-with-api.example.com/reviews",
+      "api_token": "replace-with-token"
+    }
+  },
+  "pa-beyond---hello-center-city-philadelphia": {
+    "provider": "dutchie",
+    "crawl_interval_seconds": 20,
+    "provider_config": {
+      "catalog_endpoint": "https://replace-with-dutchie-endpoint.example.com/menu",
+      "prices_endpoint": "https://replace-with-dutchie-endpoint.example.com/prices",
+      "reviews_endpoint": "https://replace-with-reviews-endpoint.example.com/reviews",
+      "api_token": "replace-with-token"
+    }
+  }
+}

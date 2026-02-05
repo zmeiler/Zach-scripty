@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dispensary Market Pulse</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Dispensary Market Pulse</h1>
+        <p id="status">Connecting to live feed...</p>
+      </header>
+
+      <section>
+        <h2>Live Price Tape</h2>
+        <div class="tape-wrapper">
+          <div id="ticker-tape" class="ticker-tape"></div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Live Price Ticker</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Price</th>
+              <th>In Stock</th>
+              <th>Last Update</th>
+            </tr>
+          </thead>
+          <tbody id="ticker-body"></tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Latest Reviews</h2>
+        <ul id="review-list"></ul>
+      </section>
+
+      <section>
+        <h2>Pennsylvania Medical Dispensary Directory</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Permittee</th>
+              <th>Location</th>
+              <th>Address</th>
+              <th>Website</th>
+            </tr>
+          </thead>
+          <tbody id="pa-directory-body"></tbody>
+        </table>
+      </section>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>
