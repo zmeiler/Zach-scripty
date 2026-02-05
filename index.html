@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Zachary Meiler — Live Shipment Ticker</title>
+  <style>
+    :root {
+      --bg: #060913;
+      --panel: #10182f;
+      --line: #26345d;
+      --txt: #e8eeff;
+      --sub: #a9b7e8;
+      --ok: #42df89;
+      --warn: #f4ce62;
+      --info: #7ab2ff;
+      --hot: #d78dff;
+      --cold: #67dfff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at top, #101b3a, var(--bg) 45%);
+      color: var(--txt);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .app { max-width: 1180px; margin: 0 auto; padding: 14px; }
+    .panel {
+      background: color-mix(in oklab, var(--panel), black 8%);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+    .top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    h1 { margin: 0; font-size: 1.1rem; }
+    .sub { color: var(--sub); font-size: .9rem; }
+
+    .grid { display: grid; gap: 8px; grid-template-columns: repeat(6, minmax(120px, 1fr)); }
+    input, select, button {
+      width: 100%;
+      background: #0a1126;
+      color: var(--txt);
+      border: 1px solid #354778;
+      border-radius: 8px;
+      padding: 9px;
+      font: inherit;
+    }
+    button { cursor: pointer; background: #17254a; }
+
+    table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+    th, td { text-align: left; padding: 9px 6px; border-bottom: 1px solid #273764; }
+    th { color: #c4cff6; }
+
+    .ordered { color: var(--cold); }
+    .shipped { color: var(--info); }
+    .in_transit { color: var(--warn); }
+    .out_for_delivery { color: var(--hot); }
+    .delivered { color: var(--ok); }
+
+    .ticker-wrap {
+      overflow: hidden;
+      border-block: 1px solid #324577;
+      background: #0a1022;
+      margin-top: 10px;
+      border-radius: 6px;
+    }
+    .ticker {
+      white-space: nowrap;
+      display: inline-block;
+      min-width: 100%;
+      padding: 8px 0;
+      animation: run 24s linear infinite;
+      will-change: transform;
+    }
+    @keyframes run {
+      from { transform: translateX(100%); }
+      to { transform: translateX(-100%); }
+    }
+
+    .controls { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .controls label { color:var(--sub); font-size:.85rem; }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <section class="panel top">
+      <div>
+        <h1>Zachary Meiler — Real-Time Package Watch</h1>
+        <div class="sub" id="profile"></div>
+      </div>
+      <div>
+        <strong id="clock"></strong>
+        <span class="sub" id="cadence"></span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="grid">
+        <select id="provider">
+          <option value="amazon">amazon</option>
+          <option value="ebay">ebay</option>
+          <option value="etsy">etsy</option>
+          <option value="walmart">walmart</option>
+          <option value="target">target</option>
+          <option value="custom">custom</option>
+        </select>
+        <input id="trackId" placeholder="order/tracking id" />
+        <input id="label" placeholder="label (e.g., keyboard)" />
+        <input id="eta" placeholder="eta yyyy-mm-dd (optional)" />
+        <input id="location" placeholder="starting location" />
+        <button id="add">Add tracker</button>
+      </div>
+      <div class="controls" style="margin-top:10px;">
+        <label>Refresh (ms)</label>
+        <input id="refresh" type="number" min="400" step="100" style="max-width:160px;" />
+        <button id="savePrefs" style="max-width:200px;">Save speed</button>
+        <button id="reset" style="max-width:200px;">Reset all data</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <table>
+        <thead>
+          <tr>
+            <th>Provider</th>
+            <th>ID</th>
+            <th>Label</th>
+            <th>Status</th>
+            <th>ETA</th>
+            <th>Location</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <div class="ticker-wrap"><div class="ticker" id="ticker"></div></div>
+    </section>
+  </main>
+
+  <script>
+    (() => {
+      const KEY = "zachary.meiler.live.tracker.v2";
+      const FLOW = ["ordered", "shipped", "in_transit", "out_for_delivery", "delivered"];
+      const START = {
+        profile: {
+          name: "Zachary Meiler",
+          address: "23 bloomingdale ct",
+          city: "york",
+          state: "pa",
+          zip: "17402-2606"
+        },
+        refreshMs: 900,
+        events: [],
+        items: [
+          { provider: "amazon", id: "AMZ-1001", label: "Amazon package", status: "ordered", eta: "", location: "Amazon FC" },
+          { provider: "ebay", id: "EBY-2001", label: "eBay package", status: "ordered", eta: "", location: "Seller Warehouse" }
+        ]
+      };
+
+      const $ = (id) => document.getElementById(id);
+      const state = (() => {
+        try { return JSON.parse(localStorage.getItem(KEY)) || structuredClone(START); }
+        catch { return structuredClone(START); }
+      })();
+
+      let timer = null;
+
+      function save() { localStorage.setItem(KEY, JSON.stringify(state)); }
+
+      function nextStatus(s) {
+        const i = FLOW.indexOf(s);
+        if (i === -1) return FLOW[0];
+        return FLOW[Math.min(i + 1, FLOW.length - 1)];
+      }
+
+      function autoEta(provider) {
+        const offset = provider === "amazon" ? 3 : provider === "ebay" ? 5 : 7;
+        return new Date(Date.now() + offset * 86400000).toISOString().slice(0, 10);
+      }
+
+      function evolve(item) {
+        const previous = item.status;
+        if (item.status !== "delivered" && Math.random() < 0.30) item.status = nextStatus(item.status);
+        if (!item.eta) item.eta = autoEta(item.provider);
+
+        if (item.status === "in_transit") item.location = item.provider === "amazon" ? "Regional carrier hub" : "Carrier network";
+        if (item.status === "out_for_delivery") item.location = "Out on delivery vehicle";
+        if (item.status === "delivered") item.location = "Delivered";
+
+        if (previous !== item.status) {
+          state.events.push(`${new Date().toLocaleTimeString()} ${item.provider.toUpperCase()} ${item.id} ${item.status.toUpperCase()}`);
+          state.events = state.events.slice(-20);
+        }
+      }
+
+      function render() {
+        $("profile").textContent = `${state.profile.name} — ${state.profile.address}, ${state.profile.city}, ${state.profile.state} ${state.profile.zip}`;
+        $("clock").textContent = new Date().toLocaleString();
+        $("cadence").textContent = ` · refresh ${state.refreshMs}ms`;
+
+        const tbody = $("rows");
+        tbody.innerHTML = "";
+        state.items.forEach((it) => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `<td>${it.provider}</td><td>${it.id}</td><td>${it.label}</td><td class="${it.status}">${it.status.replaceAll("_", " ")}</td><td>${it.eta}</td><td>${it.location}</td>`;
+          tbody.appendChild(tr);
+        });
+
+        $("ticker").textContent = state.events.length
+          ? "▶ " + state.events.join("  |  ")
+          : "▶ waiting for first status movement...";
+
+        $("refresh").value = state.refreshMs;
+      }
+
+      function cycle() {
+        state.items.forEach(evolve);
+        save();
+        render();
+      }
+
+      function restart() {
+        if (timer) clearInterval(timer);
+        timer = setInterval(cycle, Math.max(400, Number(state.refreshMs) || 900));
+      }
+
+      $("add").addEventListener("click", () => {
+        const provider = $("provider").value.trim() || "custom";
+        const id = $("trackId").value.trim();
+        const label = $("label").value.trim() || "package";
+        const eta = $("eta").value.trim();
+        const location = $("location").value.trim() || "tracking initialized";
+        if (!id) { alert("Please enter tracking ID."); return; }
+
+        state.items.push({ provider, id, label, status: "ordered", eta, location });
+        state.events.push(`${new Date().toLocaleTimeString()} + Added ${provider.toUpperCase()} ${id}`);
+        state.events = state.events.slice(-20);
+        save();
+        render();
+      });
+
+      $("savePrefs").addEventListener("click", () => {
+        state.refreshMs = Math.max(400, Number($("refresh").value) || 900);
+        save();
+        restart();
+        render();
+      });
+
+      $("reset").addEventListener("click", () => {
+        if (!confirm("Reset all saved trackers and ticker history?")) return;
+        localStorage.removeItem(KEY);
+        location.reload();
+      });
+
+      render();
+      restart();
+    })();
+  </script>
+</body>
+</html>
