@@ -13,6 +13,8 @@ const requiredArrays = [
   'categoryTabs',
   'menuButtons',
   'tenderButtons',
+  'pinpadModes',
+  'ebtOptions',
   'leftSideButtons',
   'rightSideButtons'
 ];

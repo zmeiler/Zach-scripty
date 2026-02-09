@@ -104,6 +104,12 @@ body {
   font-size: 18px;
 }
 
+.panel-header h3 {
+  margin: 0;
+  font-size: 14px;
+  color: #1f2937;
+}
+
 .badge {
   background: #22c55e;
   color: white;

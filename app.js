@@ -92,6 +92,8 @@ const populate = (layout) => {
   renderButtons('categories', layout.categoryTabs);
   renderButtons('menu', layout.menuButtons);
   renderButtons('tender', layout.tenderButtons);
+  renderButtons('pinpad-modes', layout.pinpadModes);
+  renderButtons('ebt-options', layout.ebtOptions);
   renderButtons('left-ops', layout.leftSideButtons);
   renderButtons('right-ops', layout.rightSideButtons);
   renderOrderItems(layout.orderItems);

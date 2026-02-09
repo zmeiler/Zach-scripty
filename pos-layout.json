@@ -71,6 +71,15 @@
     { "label": "$10", "color": "bg-sky-600 text-white" },
     { "label": "$20", "color": "bg-sky-600 text-white" }
   ],
+  "pinpadModes": [
+    { "label": "EMV (Chip)", "color": "bg-emerald-500 text-white", "action": "pinpad-emv" },
+    { "label": "Tap (NFC)", "color": "bg-emerald-500 text-white", "action": "pinpad-tap" },
+    { "label": "Manual Entry", "color": "bg-slate-200 text-slate-700", "action": "pinpad-manual" }
+  ],
+  "ebtOptions": [
+    { "label": "EBT Cash", "color": "bg-fuchsia-500 text-white", "action": "ebt-cash" },
+    { "label": "SNAP", "color": "bg-fuchsia-500 text-white", "action": "ebt-snap" }
+  ],
   "leftSideButtons": [
     { "label": "Voids", "color": "bg-slate-200 text-slate-700", "action": "voids" },
     { "label": "Discount", "color": "bg-slate-200 text-slate-700", "action": "discount" },
