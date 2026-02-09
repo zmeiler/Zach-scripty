@@ -12,7 +12,9 @@ const requiredArrays = [
   'orderItems',
   'categoryTabs',
   'menuButtons',
-  'tenderButtons'
+  'tenderButtons',
+  'leftSideButtons',
+  'rightSideButtons'
 ];
 
 const missing = requiredArrays.filter((key) => !Array.isArray(layout[key]));

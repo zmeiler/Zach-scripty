@@ -70,5 +70,21 @@
     { "label": "$5", "color": "bg-sky-600 text-white" },
     { "label": "$10", "color": "bg-sky-600 text-white" },
     { "label": "$20", "color": "bg-sky-600 text-white" }
+  ],
+  "leftSideButtons": [
+    { "label": "Voids", "color": "bg-slate-200 text-slate-700", "action": "voids" },
+    { "label": "Discount", "color": "bg-slate-200 text-slate-700", "action": "discount" },
+    { "label": "Reprint", "color": "bg-slate-200 text-slate-700", "action": "reprint" },
+    { "label": "Notes", "color": "bg-slate-200 text-slate-700", "action": "notes" },
+    { "label": "Kitchen", "color": "bg-slate-200 text-slate-700", "action": "kitchen" },
+    { "label": "Loyalty", "color": "bg-slate-200 text-slate-700", "action": "loyalty" }
+  ],
+  "rightSideButtons": [
+    { "label": "Manager", "color": "bg-amber-400 text-slate-900", "action": "manager" },
+    { "label": "Refund", "color": "bg-amber-400 text-slate-900", "action": "refund" },
+    { "label": "Open Drawer", "color": "bg-amber-400 text-slate-900", "action": "drawer" },
+    { "label": "Shift Report", "color": "bg-amber-400 text-slate-900", "action": "shift" },
+    { "label": "Clock In/Out", "color": "bg-amber-400 text-slate-900", "action": "clock" },
+    { "label": "Lock Screen", "color": "bg-amber-400 text-slate-900", "action": "lock" }
   ]
 }

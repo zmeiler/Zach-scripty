@@ -1,7 +1,25 @@
+const actionStatus = () => document.getElementById('action-status');
+
+const updateStatus = (message) => {
+  const status = actionStatus();
+  if (status) {
+    status.textContent = message;
+  }
+};
+
+const handleAction = (item) => {
+  const message = item.action
+    ? `Action triggered: ${item.label}`
+    : `Selected ${item.label}`;
+  updateStatus(message);
+  console.log(message);
+};
+
 const createButton = (item) => {
   const button = document.createElement('button');
   button.className = `square-button ${item.color || ''}`.trim();
   button.textContent = item.label;
+  button.addEventListener('click', () => handleAction(item));
   return button;
 };
 
@@ -74,8 +92,11 @@ const populate = (layout) => {
   renderButtons('categories', layout.categoryTabs);
   renderButtons('menu', layout.menuButtons);
   renderButtons('tender', layout.tenderButtons);
+  renderButtons('left-ops', layout.leftSideButtons);
+  renderButtons('right-ops', layout.rightSideButtons);
   renderOrderItems(layout.orderItems);
   renderSummary(layout.summary);
+  updateStatus('Ready for next order.');
 };
 
 document.addEventListener('DOMContentLoaded', () => {

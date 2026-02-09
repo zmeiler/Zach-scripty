@@ -12,6 +12,7 @@
         <div>
           <p class="eyebrow">Store 12 • Counter 3</p>
           <h1>Chicken POS</h1>
+          <p class="status" id="action-status">Ready for next order.</p>
         </div>
         <div class="header-meta">
           <div>
@@ -49,6 +50,14 @@
             </div>
             <div class="button-grid" id="quick-actions"></div>
           </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <h2>Operations</h2>
+              <span class="muted">Left side</span>
+            </div>
+            <div class="button-grid utilities" id="left-ops"></div>
+          </div>
         </section>
 
         <section class="center-panel">
@@ -84,6 +93,14 @@
             <div class="button-grid tender" id="tender"></div>
             <button class="action primary">Charge $46.41</button>
             <button class="action">Print Receipt</button>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <h2>Manager Tools</h2>
+              <span class="muted">Right side</span>
+            </div>
+            <div class="button-grid utilities" id="right-ops"></div>
           </div>
         </section>
       </main>
