@@ -23,6 +23,16 @@ const createButton = (item) => {
   return button;
 };
 
+const wireActionButtons = () => {
+  document.querySelectorAll('.action').forEach((button) => {
+    button.addEventListener('click', () => {
+      const label = button.textContent?.trim() || 'Action';
+      updateStatus(`Action triggered: ${label}`);
+      console.log(`Action triggered: ${label}`);
+    });
+  });
+};
+
 const renderButtons = (containerId, items) => {
   const container = document.getElementById(containerId);
   container.innerHTML = '';
@@ -99,6 +109,7 @@ const populate = (layout) => {
   renderOrderItems(layout.orderItems);
   renderSummary(layout.summary);
   updateStatus('Ready for next order.');
+  wireActionButtons();
 };
 
 document.addEventListener('DOMContentLoaded', () => {
