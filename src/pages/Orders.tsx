@@ -1,7 +1,7 @@
-import { useAuth } from "@/_core/hooks/useAuth";
+import { useAuth } from "../_core/hooks/useAuth";
 import { useLocation } from "wouter";
 import { ArrowLeft, Plus } from "lucide-react";
-import posLayout from "./pos-layout.json";
+import posLayout from "../../pos-layout.json";
 
 export default function Orders() {
   useAuth();
