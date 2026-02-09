@@ -1,0 +1,74 @@
+{
+  "quickActions": [
+    { "label": "Hold", "color": "bg-emerald-500 text-white" },
+    { "label": "Recall", "color": "bg-emerald-500 text-white" },
+    { "label": "Split", "color": "bg-emerald-500 text-white" },
+    { "label": "Table", "color": "bg-sky-500 text-white" },
+    { "label": "Seat", "color": "bg-sky-500 text-white" },
+    { "label": "Guest", "color": "bg-sky-500 text-white" }
+  ],
+  "keypad": [
+    { "label": "1", "color": "bg-emerald-500 text-white" },
+    { "label": "2", "color": "bg-emerald-500 text-white" },
+    { "label": "3", "color": "bg-emerald-500 text-white" },
+    { "label": "4", "color": "bg-emerald-500 text-white" },
+    { "label": "5", "color": "bg-emerald-500 text-white" },
+    { "label": "6", "color": "bg-emerald-500 text-white" },
+    { "label": "7", "color": "bg-emerald-500 text-white" },
+    { "label": "8", "color": "bg-emerald-500 text-white" },
+    { "label": "9", "color": "bg-emerald-500 text-white" },
+    { "label": "0", "color": "bg-emerald-500 text-white" },
+    { "label": "00", "color": "bg-emerald-500 text-white" },
+    { "label": "Clear", "color": "bg-slate-200 text-slate-700" }
+  ],
+  "summary": [
+    { "label": "Subtotal", "value": "$42.50" },
+    { "label": "Tax", "value": "$3.91" },
+    { "label": "Total", "value": "$46.41", "emphasis": true }
+  ],
+  "orderItems": [
+    {
+      "name": "Crispy Chicken Combo",
+      "modifier": "Spicy • Fries • Cola",
+      "quantity": 1,
+      "price": "$18.99"
+    },
+    {
+      "name": "Wings (10pc)",
+      "modifier": "Garlic Parmesan",
+      "quantity": 1,
+      "price": "$12.50"
+    },
+    {
+      "name": "Chicken Sandwich",
+      "modifier": "No pickles",
+      "quantity": 1,
+      "price": "$11.01"
+    }
+  ],
+  "categoryTabs": [
+    { "label": "Combos", "color": "bg-fuchsia-500 text-white" },
+    { "label": "Specials", "color": "bg-indigo-500 text-white" },
+    { "label": "Wings", "color": "bg-emerald-500 text-white" },
+    { "label": "Family", "color": "bg-slate-200 text-slate-700" }
+  ],
+  "menuButtons": [
+    { "label": "2pc Meal", "color": "bg-indigo-500 text-white" },
+    { "label": "3pc Meal", "color": "bg-indigo-500 text-white" },
+    { "label": "4pc Meal", "color": "bg-indigo-500 text-white" },
+    { "label": "Sandwich", "color": "bg-indigo-500 text-white" },
+    { "label": "Tenders", "color": "bg-indigo-500 text-white" },
+    { "label": "Kids", "color": "bg-indigo-500 text-white" },
+    { "label": "Fries", "color": "bg-slate-200 text-slate-700" },
+    { "label": "Coleslaw", "color": "bg-slate-200 text-slate-700" },
+    { "label": "Mac & Cheese", "color": "bg-slate-200 text-slate-700" }
+  ],
+  "tenderButtons": [
+    { "label": "Cash", "color": "bg-amber-400 text-slate-900" },
+    { "label": "Card", "color": "bg-amber-400 text-slate-900" },
+    { "label": "Gift", "color": "bg-amber-400 text-slate-900" },
+    { "label": "$5", "color": "bg-sky-600 text-white" },
+    { "label": "$10", "color": "bg-sky-600 text-white" },
+    { "label": "$20", "color": "bg-sky-600 text-white" }
+  ]
+}

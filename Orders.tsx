@@ -1,182 +1,206 @@
 import { useAuth } from "@/_core/hooks/useAuth";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { useLocation } from "wouter";
-import { ArrowLeft, Plus, Clock, CheckCircle, AlertCircle } from "lucide-react";
+import { ArrowLeft, Plus } from "lucide-react";
+import posLayout from "./pos-layout.json";
 
 export default function Orders() {
-  const { user } = useAuth();
-  const [, setLocation] = useLocation();
-  const mode = new URLSearchParams(window.location.search).get("mode") || "active";
-
-  const orders = [
-    {
-      id: 1,
-      orderNumber: "ORD-001",
-      customer: "John Doe",
-      items: 3,
-      total: "$45.99",
-      status: "preparing",
-      time: "5 min ago",
-    },
-    {
-      id: 2,
-      orderNumber: "ORD-002",
-      customer: "Jane Smith",
-      items: 2,
-      total: "$32.50",
-      status: "ready",
-      time: "2 min ago",
-    },
-    {
-      id: 3,
-      orderNumber: "ORD-003",
-      customer: "Walk-in",
-      items: 1,
-      total: "$18.99",
-      status: "pending",
-      time: "Just now",
-    },
-  ];
-
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case "pending":
-        return <AlertCircle className="w-5 h-5 text-yellow-600" />;
-      case "preparing":
-        return <Clock className="w-5 h-5 text-blue-600" />;
-      case "ready":
-        return <CheckCircle className="w-5 h-5 text-green-600" />;
-      default:
-        return null;
-    }
-  };
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "pending":
-        return "badge-pending";
-      case "preparing":
-        return "badge-preparing";
-      case "ready":
-        return "badge-ready";
-      default:
-        return "";
-    }
-  };
+  useAuth();
+  const [location, setLocation] = useLocation();
+  const modeFromPath = location.split("/")[2];
+  const modeFromQuery =
+    typeof window === "undefined"
+      ? null
+      : new URLSearchParams(window.location.search).get("mode");
+  const supportedModes = new Set(["active", "completed", "history"]);
+  const modeCandidate = modeFromQuery || modeFromPath || "active";
+  const mode = supportedModes.has(modeCandidate) ? modeCandidate : "active";
+  const { orderItems, summary, keypad, quickActions, categoryTabs, menuButtons, tenderButtons } =
+    posLayout;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background to-muted">
-      {/* Header */}
-      <header className="bg-card border-b border-border sticky top-0 z-50">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+    <div className="min-h-screen bg-slate-100 text-slate-900">
+      <header className="sticky top-0 z-50 bg-white border-b border-slate-200">
+        <div className="mx-auto max-w-[1400px] px-6 py-4 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-4">
-            <Button
-              variant="ghost"
-              size="icon"
+            <button
               onClick={() => setLocation("/")}
-              className="text-muted-foreground hover:text-foreground"
+              className="h-11 w-11 rounded-md border border-slate-300 bg-white shadow-sm flex items-center justify-center hover:bg-slate-100"
+              aria-label="Back to dashboard"
             >
               <ArrowLeft className="w-5 h-5" />
-            </Button>
+            </button>
             <div>
-              <h1 className="text-2xl font-bold text-foreground">Orders</h1>
-              <p className="text-sm text-muted-foreground">Manage customer orders</p>
+              <p className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                Chicken POS
+              </p>
+              <h1 className="text-2xl font-bold">Order Entry</h1>
             </div>
           </div>
-
-          <Button className="btn-touch bg-accent hover:bg-accent/90 text-accent-foreground gap-2">
-            <Plus className="w-5 h-5" />
-            New Order
-          </Button>
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="rounded-md bg-emerald-100 px-3 py-2 text-sm font-semibold text-emerald-800">
+              {mode.toUpperCase()} MODE
+            </span>
+            <button className="h-11 rounded-md bg-emerald-600 px-5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">
+              Open Drawer
+            </button>
+            <button className="h-11 rounded-md bg-slate-900 px-5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 flex items-center gap-2">
+              <Plus className="w-4 h-4" />
+              New Ticket
+            </button>
+          </div>
         </div>
       </header>
 
-      {/* Tabs */}
-      <div className="bg-card border-b border-border sticky top-16 z-40">
-        <div className="container mx-auto px-4">
-          <div className="flex gap-8">
-            <button
-              onClick={() => setLocation("/orders?mode=active")}
-              className={`px-4 py-3 border-b-2 font-medium transition-colors ${
-                mode === "active"
-                  ? "border-accent text-accent"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Active Orders
-            </button>
-            <button
-              onClick={() => setLocation("/orders?mode=completed")}
-              className={`px-4 py-3 border-b-2 font-medium transition-colors ${
-                mode === "completed"
-                  ? "border-accent text-accent"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              Completed
-            </button>
-            <button
-              onClick={() => setLocation("/orders?mode=history")}
-              className={`px-4 py-3 border-b-2 font-medium transition-colors ${
-                mode === "history"
-                  ? "border-accent text-accent"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              History
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Content */}
-      <main className="container mx-auto px-4 py-8">
-        <div className="grid gap-4">
-          {orders.map((order) => (
-            <Card
-              key={order.id}
-              className="p-6 card-elegant hover:shadow-lg transition-shadow cursor-pointer"
-            >
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-2">
-                    <h3 className="text-lg font-semibold text-foreground">
-                      {order.orderNumber}
-                    </h3>
-                    <span className={`badge-status ${getStatusBadge(order.status)}`}>
-                      {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
-                    </span>
-                  </div>
-                  <p className="text-sm text-muted-foreground mb-2">
-                    Customer: {order.customer}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    {order.items} items • {order.time}
-                  </p>
-                </div>
-
-                <div className="text-right">
-                  <p className="text-2xl font-bold text-foreground mb-2">
-                    {order.total}
-                  </p>
-                  <div className="flex items-center justify-end gap-2">
-                    {getStatusIcon(order.status)}
-                    <span className="text-sm font-medium text-muted-foreground">
-                      {order.status === "ready" ? "Ready" : "In Progress"}
-                    </span>
-                  </div>
-                </div>
+      <main className="mx-auto max-w-[1400px] px-6 py-6">
+        <div className="grid gap-6 xl:grid-cols-[280px_1fr_360px]">
+          <section className="space-y-6">
+            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <h2 className="text-sm font-semibold text-slate-500 uppercase mb-3">
+                Quick Keys
+              </h2>
+              <div className="grid grid-cols-3 gap-2">
+                {quickActions.map((action) => (
+                  <button
+                    key={action.label}
+                    className={`aspect-square rounded-md border border-slate-200 text-sm font-semibold shadow-sm ${action.color}`}
+                  >
+                    {action.label}
+                  </button>
+                ))}
               </div>
-            </Card>
-          ))}
-        </div>
+            </div>
 
-        {orders.length === 0 && (
-          <div className="text-center py-12">
-            <p className="text-lg text-muted-foreground">No orders found</p>
-          </div>
-        )}
+            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <h2 className="text-sm font-semibold text-slate-500 uppercase mb-3">
+                Keypad
+              </h2>
+              <div className="grid grid-cols-3 gap-2">
+                {keypad.map((key) => (
+                  <button
+                    key={key.label}
+                    className={`aspect-square rounded-md border border-slate-200 text-lg font-bold shadow-sm ${key.color}`}
+                  >
+                    {key.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <h2 className="text-sm font-semibold text-slate-500 uppercase mb-3">
+                Totals
+              </h2>
+              <div className="space-y-2 text-sm">
+                {summary.map((line) => (
+                  <div key={line.label} className="flex items-center justify-between">
+                    <span className="text-slate-500">{line.label}</span>
+                    <span className={`font-semibold ${line.emphasis ? "text-emerald-600" : ""}`}>
+                      {line.value}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <button className="mt-4 w-full rounded-md bg-emerald-600 py-3 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700">
+                Pay Now
+              </button>
+            </div>
+          </section>
+
+          <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-200 px-4 py-3 flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold">Ticket 1084</h2>
+                <p className="text-sm text-slate-500">Dine In • Table 4</p>
+              </div>
+              <span className="rounded-md bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-700">
+                Open
+              </span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3 text-left font-semibold">Item</th>
+                    <th className="px-4 py-3 text-center font-semibold">Qty</th>
+                    <th className="px-4 py-3 text-right font-semibold">Price</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {orderItems.map((item) => (
+                    <tr key={item.name} className="border-t border-slate-100">
+                      <td className="px-4 py-3">
+                        <p className="font-semibold">{item.name}</p>
+                        <p className="text-xs text-slate-500">{item.modifier}</p>
+                      </td>
+                      <td className="px-4 py-3 text-center font-semibold">{item.quantity}</td>
+                      <td className="px-4 py-3 text-right font-semibold">{item.price}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="border-t border-slate-200 p-4 grid grid-cols-3 gap-2">
+              {["Discount", "Void Item", "Send to Kitchen"].map((action) => (
+                <button
+                  key={action}
+                  className="h-12 rounded-md border border-slate-200 bg-white text-sm font-semibold shadow-sm hover:bg-slate-100"
+                >
+                  {action}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="space-y-6">
+            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <h2 className="text-sm font-semibold text-slate-500 uppercase mb-3">
+                Categories
+              </h2>
+              <div className="grid grid-cols-2 gap-2">
+                {categoryTabs.map((tab) => (
+                  <button
+                    key={tab.label}
+                    className={`h-14 rounded-md border border-slate-200 text-sm font-semibold shadow-sm ${tab.color}`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <h2 className="text-sm font-semibold text-slate-500 uppercase mb-3">
+                Menu Grid
+              </h2>
+              <div className="grid grid-cols-3 gap-2">
+                {menuButtons.map((button) => (
+                  <button
+                    key={button.label}
+                    className={`aspect-square rounded-md border border-slate-200 text-sm font-semibold shadow-sm ${button.color}`}
+                  >
+                    {button.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <h2 className="text-sm font-semibold text-slate-500 uppercase mb-3">
+                Tender
+              </h2>
+              <div className="grid grid-cols-3 gap-2">
+                {tenderButtons.map((button) => (
+                  <button
+                    key={button.label}
+                    className={`h-12 rounded-md border border-slate-200 text-sm font-semibold shadow-sm ${button.color}`}
+                  >
+                    {button.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </section>
+        </div>
       </main>
     </div>
   );
