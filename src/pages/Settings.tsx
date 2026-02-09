@@ -1,6 +1,6 @@
-import { useAuth } from "@/_core/hooks/useAuth";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { useAuth } from "../_core/hooks/useAuth";
+import { Button } from "../components/ui/button";
+import { Card } from "../components/ui/card";
 import { useLocation } from "wouter";
 import { ArrowLeft, Menu, Package, Users, AlertCircle } from "lucide-react";
 import { useState } from "react";

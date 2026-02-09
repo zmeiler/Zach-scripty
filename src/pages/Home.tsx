@@ -1,9 +1,9 @@
-import { useAuth } from "@/_core/hooks/useAuth";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import { getLoginUrl } from "@/const";
+import { useAuth } from "../_core/hooks/useAuth";
+import { Button } from "../components/ui/button";
+import { Card } from "../components/ui/card";
+import { getLoginUrl } from "../const";
 import { ShoppingCart, Users, BarChart3, Settings, LogOut, Clock } from "lucide-react";
-import { trpc } from "@/lib/trpc";
+import { trpc } from "../lib/trpc";
 import { useLocation } from "wouter";
 
 export default function Home() {
