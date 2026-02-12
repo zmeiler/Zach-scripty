@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 
-from .game import SurvivalGame, run_title
+from .game import SurvivalGame
 
 
 def main() -> None:
@@ -18,15 +18,15 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    game = SurvivalGame(seed=args.seed, target_days=args.days)
+    victory, summary = game.autoplay()
+
+    outcome = "VICTORY" if victory else "DEFEAT"
+    print(f"{outcome}: {summary} | {game.campaign_report()}")
+
     if args.show_log:
-        game = SurvivalGame(seed=args.seed, target_days=args.days)
-        _, _ = game.autoplay()
-        print(run_title(seed=args.seed, target_days=args.days))
         for event in game.log:
             print(f" - {event}")
-        return
-
-    print(run_title(seed=args.seed, target_days=args.days))
 
 
 if __name__ == "__main__":

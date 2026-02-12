@@ -23,6 +23,25 @@ ashenfall --seed 9 --days 18
 ashenfall --seed 9 --days 18 --show-log
 ```
 
+### Windows one-click build + run
+
+Use the included batch file:
+
+```bat
+scripts\build_and_run_ashenfall.bat
+scripts\build_and_run_ashenfall.bat 7 14
+scripts\build_and_run_ashenfall.bat 7 14 --show-log
+scripts\build_and_run_ashenfall.bat 7 14 --show-log --debug
+```
+
+This script will:
+- create `.venv` if missing
+- install/update dependencies
+- run `pytest -q`
+- verify `engine3d` import before launch
+- run the Ashenfall CLI with the provided seed/days
+- print diagnostics automatically if launch fails
+
 ## Gameplay architecture
 
 - `src/engine3d/core.py`: ECS-inspired engine orchestration
