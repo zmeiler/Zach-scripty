@@ -1,9 +1,9 @@
-import { Toaster } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import NotFound from "@/pages/NotFound";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
+import { Toaster } from "./components/ui/sonner";
+import { TooltipProvider } from "./components/ui/tooltip";
+import NotFound from "./pages/NotFound";
 import Home from "./pages/Home";
 import Orders from "./pages/Orders";
 import Customers from "./pages/Customers";
@@ -16,6 +16,7 @@ function Router() {
     <Switch>
       <Route path={"/"} component={Home} />
       <Route path={"/orders"} component={Orders} />
+      <Route path={"/orders/:mode"} component={Orders} />
       <Route path={"/customers"} component={Customers} />
       <Route path={"/analytics"} component={Analytics} />
       <Route path={"/settings"} component={Settings} />
