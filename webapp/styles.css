@@ -1,0 +1,85 @@
+:root {
+  --bg: #f3f6fb;
+  --card: #ffffff;
+  --text: #172033;
+  --muted: #5f6c87;
+  --accent: #2a6ef2;
+  --danger: #d94848;
+  --border: #e2e8f0;
+}
+
+body.dark {
+  --bg: #0f172a;
+  --card: #111b33;
+  --text: #e7edf9;
+  --muted: #a3b0ca;
+  --accent: #73a3ff;
+  --danger: #ff8585;
+  --border: #243357;
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: Inter, Segoe UI, Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+  position: sticky;
+  top: 0;
+}
+.top-actions { display: flex; gap: .5rem; }
+main { max-width: 1024px; margin: 1.25rem auto; padding: 0 1rem; }
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+}
+label { display: block; margin-bottom: .6rem; font-size: .95rem; }
+input, select, button {
+  width: 100%;
+  margin-top: .25rem;
+  padding: .6rem .7rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+}
+button {
+  cursor: pointer;
+  background: var(--accent);
+  color: white;
+  border: none;
+  font-weight: 600;
+}
+#themeToggle, #logoutBtn { width: auto; padding: .5rem .75rem; }
+.muted { color: var(--muted); }
+.hidden { display: none; }
+.account-item {
+  display: flex;
+  justify-content: space-between;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .6rem;
+  margin-bottom: .5rem;
+}
+table { width: 100%; border-collapse: collapse; }
+th, td { border-top: 1px solid var(--border); padding: .55rem .4rem; text-align: left; }
+.row-between { display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
+#search { max-width: 280px; }
+.negative { color: var(--danger); }
+.positive { color: #1f9d55; }
