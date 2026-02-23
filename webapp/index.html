@@ -3,14 +3,21 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>VaultWave - HTML5 Banking</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'" />
+  <meta http-equiv="X-Content-Type-Options" content="nosniff" />
+  <meta http-equiv="Referrer-Policy" content="same-origin" />
+  <title>FortiBank Secure Console</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <header class="topbar">
-    <h1>VaultWave</h1>
+    <div>
+      <h1>FortiBank Secure Console</h1>
+      <p class="muted">HTML5-only banking demo with PCI-DSS inspired guardrails.</p>
+    </div>
     <div class="top-actions">
       <button id="themeToggle" aria-label="Toggle theme">🌗</button>
+      <button id="lockBtn" class="hidden">Lock Session</button>
       <button id="logoutBtn" class="hidden">Logout</button>
     </div>
   </header>
@@ -18,66 +25,159 @@
   <main>
     <section id="authView" class="card">
       <h2>Secure Sign In</h2>
-      <p class="muted">Demo app with local-only data. No real banking network calls.</p>
-      <form id="loginForm">
+      <p class="muted">This demo never sends data to a backend and avoids storing full card numbers.</p>
+      <form id="loginForm" autocomplete="off" novalidate>
         <label>Email
-          <input id="email" type="email" required placeholder="you@example.com" />
+          <input id="email" type="email" required placeholder="you@example.com" autocomplete="off" inputmode="email" />
         </label>
         <label>Password
-          <input id="password" type="password" minlength="8" required placeholder="••••••••" />
+          <input id="password" type="password" minlength="12" required placeholder="••••••••••••" autocomplete="new-password" />
         </label>
-        <label>One-time code (MFA)
-          <input id="mfa" type="text" pattern="\d{6}" placeholder="123456" required />
+        <label>6-digit MFA code
+          <input id="mfa" type="text" pattern="\d{6}" maxlength="6" required placeholder="123456" inputmode="numeric" />
         </label>
-        <button type="submit">Sign in</button>
+        <label>Security phrase
+          <input id="securityPhrase" type="text" minlength="4" maxlength="40" required placeholder="e.g., Blue Falcon" />
+        </label>
+        <button type="submit">Sign In</button>
       </form>
+      <p id="authStatus" class="muted"></p>
     </section>
 
     <section id="appView" class="hidden">
-      <div class="grid">
-        <article class="card">
-          <h3>Accounts</h3>
-          <div id="accounts"></div>
-        </article>
-
-        <article class="card">
-          <h3>Quick transfer</h3>
-          <form id="transferForm">
-            <label>From
-              <select id="fromAccount"></select>
-            </label>
-            <label>To
-              <select id="toAccount"></select>
-            </label>
-            <label>Amount
-              <input id="amount" type="number" min="1" step="0.01" required />
-            </label>
-            <label>Memo
-              <input id="memo" type="text" maxlength="80" />
-            </label>
-            <button type="submit">Send transfer</button>
-          </form>
-          <p id="transferStatus" class="muted"></p>
-        </article>
+      <div class="nav-tabs card">
+        <button class="tab active" data-tab="dashboard">Dashboard</button>
+        <button class="tab" data-tab="payments">Payments</button>
+        <button class="tab" data-tab="cards">Cards</button>
+        <button class="tab" data-tab="security">Security Center</button>
+        <button class="tab" data-tab="compliance">Compliance</button>
       </div>
 
-      <article class="card">
-        <div class="row-between">
-          <h3>Transactions</h3>
-          <input id="search" placeholder="Search memo/account..." />
+      <section id="dashboard" class="tab-panel">
+        <div class="grid">
+          <article class="card">
+            <h3>Accounts</h3>
+            <div id="accounts"></div>
+          </article>
+          <article class="card">
+            <h3>Financial Snapshot</h3>
+            <ul class="plain-list" id="snapshotList"></ul>
+          </article>
         </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Description</th>
-              <th>Amount</th>
-              <th>Balance</th>
-            </tr>
-          </thead>
-          <tbody id="txTable"></tbody>
-        </table>
-      </article>
+        <article class="card">
+          <div class="row-between">
+            <h3>Transactions</h3>
+            <input id="search" placeholder="Search memo/account" />
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Description</th>
+                <th>Amount</th>
+                <th>Balance</th>
+              </tr>
+            </thead>
+            <tbody id="txTable"></tbody>
+          </table>
+        </article>
+      </section>
+
+      <section id="payments" class="tab-panel hidden">
+        <div class="grid">
+          <article class="card">
+            <h3>Internal Transfer</h3>
+            <form id="transferForm">
+              <label>From
+                <select id="fromAccount"></select>
+              </label>
+              <label>To
+                <select id="toAccount"></select>
+              </label>
+              <label>Amount
+                <input id="amount" type="number" min="0.01" step="0.01" required />
+              </label>
+              <label>Memo
+                <input id="memo" type="text" maxlength="80" />
+              </label>
+              <button type="submit">Send Transfer</button>
+            </form>
+            <p id="transferStatus" class="muted"></p>
+          </article>
+
+          <article class="card">
+            <h3>Bill Pay Scheduler</h3>
+            <form id="billForm">
+              <label>Payee
+                <input id="payee" type="text" maxlength="40" required />
+              </label>
+              <label>Due Date
+                <input id="dueDate" type="date" required />
+              </label>
+              <label>Amount
+                <input id="billAmount" type="number" min="0.01" step="0.01" required />
+              </label>
+              <button type="submit">Schedule Payment</button>
+            </form>
+            <ul id="billList" class="plain-list"></ul>
+          </article>
+        </div>
+      </section>
+
+      <section id="cards" class="tab-panel hidden">
+        <div class="grid">
+          <article class="card">
+            <h3>Virtual Card Generator</h3>
+            <form id="cardForm" autocomplete="off">
+              <label>Card Alias
+                <input id="cardAlias" type="text" maxlength="30" required placeholder="Travel Purchases" />
+              </label>
+              <label>Monthly Spend Limit
+                <input id="cardLimit" type="number" min="10" max="10000" step="10" required />
+              </label>
+              <button type="submit">Create Tokenized Card</button>
+            </form>
+            <p class="muted">Generated cards show only last 4 digits. Full PAN is never stored.</p>
+          </article>
+
+          <article class="card">
+            <h3>Saved Cards</h3>
+            <div id="cardsList"></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="security" class="tab-panel hidden">
+        <div class="grid">
+          <article class="card">
+            <h3>Security Controls</h3>
+            <label class="check-line"><input id="notifToggle" type="checkbox" checked /> Login anomaly alerts</label>
+            <label class="check-line"><input id="geoToggle" type="checkbox" checked /> Geographic lock</label>
+            <label class="check-line"><input id="velocityToggle" type="checkbox" checked /> Velocity limit checks</label>
+            <label>Session timeout (minutes)
+              <input id="timeoutInput" type="number" min="1" max="60" step="1" />
+            </label>
+            <button id="saveSecurityBtn">Save Security Settings</button>
+            <p id="securityStatus" class="muted"></p>
+          </article>
+
+          <article class="card">
+            <h3>Audit Trail</h3>
+            <ul id="auditTrail" class="plain-list"></ul>
+          </article>
+        </div>
+      </section>
+
+      <section id="compliance" class="tab-panel hidden">
+        <article class="card">
+          <h3>PCI-DSS Readiness Checklist (Demo)</h3>
+          <ul class="plain-list" id="complianceList"></ul>
+          <p class="muted">
+            Note: this is a local demonstration app. Real PCI-DSS compliance requires certified infrastructure,
+            regular ASV scans, segmentation, key management, secure SDLC, and external assessment.
+          </p>
+        </article>
+      </section>
     </section>
   </main>
 
