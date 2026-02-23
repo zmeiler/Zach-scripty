@@ -64,3 +64,15 @@ This is close to how high-end teams separate concerns:
 - Equipment tiers + modular crafting recipes
 - Save/load snapshots with deterministic replays for QA
 - Native rendering/physics bindings for real 3D runtime visuals
+
+## HTML5 banking demo
+
+A standalone HTML5 banking demo is available in `webapp/` (client-side only, localStorage-backed):
+
+```bash
+cd webapp
+python -m http.server 8080
+# open http://localhost:8080
+```
+
+Includes demo sign-in with MFA field, account balances, internal transfer flow, transaction search, and dark mode.

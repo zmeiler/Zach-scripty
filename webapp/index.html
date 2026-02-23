@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VaultWave - HTML5 Banking</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>VaultWave</h1>
+    <div class="top-actions">
+      <button id="themeToggle" aria-label="Toggle theme">🌗</button>
+      <button id="logoutBtn" class="hidden">Logout</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="authView" class="card">
+      <h2>Secure Sign In</h2>
+      <p class="muted">Demo app with local-only data. No real banking network calls.</p>
+      <form id="loginForm">
+        <label>Email
+          <input id="email" type="email" required placeholder="you@example.com" />
+        </label>
+        <label>Password
+          <input id="password" type="password" minlength="8" required placeholder="••••••••" />
+        </label>
+        <label>One-time code (MFA)
+          <input id="mfa" type="text" pattern="\d{6}" placeholder="123456" required />
+        </label>
+        <button type="submit">Sign in</button>
+      </form>
+    </section>
+
+    <section id="appView" class="hidden">
+      <div class="grid">
+        <article class="card">
+          <h3>Accounts</h3>
+          <div id="accounts"></div>
+        </article>
+
+        <article class="card">
+          <h3>Quick transfer</h3>
+          <form id="transferForm">
+            <label>From
+              <select id="fromAccount"></select>
+            </label>
+            <label>To
+              <select id="toAccount"></select>
+            </label>
+            <label>Amount
+              <input id="amount" type="number" min="1" step="0.01" required />
+            </label>
+            <label>Memo
+              <input id="memo" type="text" maxlength="80" />
+            </label>
+            <button type="submit">Send transfer</button>
+          </form>
+          <p id="transferStatus" class="muted"></p>
+        </article>
+      </div>
+
+      <article class="card">
+        <div class="row-between">
+          <h3>Transactions</h3>
+          <input id="search" placeholder="Search memo/account..." />
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Description</th>
+              <th>Amount</th>
+              <th>Balance</th>
+            </tr>
+          </thead>
+          <tbody id="txTable"></tbody>
+        </table>
+      </article>
+    </section>
+  </main>
+
+  <template id="acctTemplate">
+    <div class="account-item">
+      <strong class="name"></strong>
+      <span class="balance"></span>
+    </div>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
