@@ -1,4 +1,1215 @@
-# Ashenfall — Expanded Python Survival Title Prototype
+
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>C64 SMART Scheduler - PRO</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      background:#000; display:flex; justify-content:center; align-items:center;
+      height:100vh; height:100dvh; font-family:'Courier New',Courier,monospace; overflow:hidden;
+    }
+    #fullscreen-btn {
+      position:fixed; top:6px; right:8px; background:#00AAAA; color:#0000AA;
+      border:2px solid #AAAAFF; padding:3px 7px; font-family:'Courier New',Courier,monospace;
+      font-weight:bold; font-size:11px; cursor:pointer; z-index:200; user-select:none;
+    }
+    #fullscreen-btn:hover { background:#AAAAFF; }
+    #c64-screen {
+      background:#0000AA; color:#AAAAFF;
+      width:100vw; width:100dvw; height:100vh; height:100dvh;
+      border:8px solid #00AAAA; padding:8px 10px;
+      display:flex; flex-direction:column;
+      overflow-y:auto; overflow-x:hidden;
+      user-select:none; -webkit-user-select:none;
+      font-size:clamp(9px,1.45vw,19px); line-height:1.28;
+      outline:2px solid #00AAAA;
+    }
+    #c64-screen.fullscreen { border:none; outline:none; padding:4px 8px; }
+    .row { white-space:pre; min-height:1.28em; }
+    .hi  { background:#00AAAA; color:#0000AA; }
+    .cur { animation:cblink 0.7s step-end infinite; }
+    @keyframes cblink { 50%{ background:#0000AA; color:#00AAAA; } }
+    .blink { animation:bl 0.6s step-end infinite; }
+    @keyframes bl { 50%{ visibility:hidden; } }
+    .cmd-cur {
+      display:inline-block; width:0.65em; height:0.95em;
+      background:#AAAAFF; margin-left:1px;
+      animation:cc 0.8s step-end infinite;
+    }
+    @keyframes cc { 50%{ opacity:0; } }
+    .clocked-in { color:#55FF55; }
+    .clocked-out { color:#FF5555; }
+    #v-keys {
+      position:fixed; bottom:0; left:0; width:100%; background:#0000AA;
+      border-top:2px solid #00AAAA; display:none;
+      grid-template-columns:repeat(4,1fr); gap:2px; padding:3px; z-index:100;
+    }
+    #v-keys.show { display:grid; }
+    .vk {
+      background:#00AAAA; color:#0000AA; text-align:center; padding:9px 0;
+      font-weight:bold; font-size:13px; cursor:pointer; border:1px solid #AAAAFF;
+    }
+    .vk:active { background:#AAAAFF; }
+  </style>
+</head>
+<body>
+<button id="fullscreen-btn">[ ]</button>
+<div id="c64-screen" tabindex="0"></div>
+<div id="v-keys">
+  <div class="vk" onclick="sk('ArrowUp')">UP</div>
+  <div class="vk" onclick="sk('ArrowDown')">DOWN</div>
+  <div class="vk" onclick="sk('ArrowLeft')">LEFT</div>
+  <div class="vk" onclick="sk('ArrowRight')">RIGHT</div>
+  <div class="vk" onclick="sk('Enter')">ENTER</div>
+  <div class="vk" onclick="sk('Backspace')">BACK</div>
+  <div class="vk" onclick="sk('Escape')">ESC</div>
+  <div class="vk" onclick="sk('Tab')">TAB</div>
+</div>
+<script>
+'use strict';
+// ═══════════════════════════════════════════════════════════
+//  CONSTANTS
+// ═══════════════════════════════════════════════════════════
+const DAYS = ["MON","TUE","WED","THU","FRI","SAT","SUN"];
+const ENW = 10, SW = 8;
+
+const HOME_MENU = [
+  'PERSONNEL','ONBOARDING','SCHEDULER','TIME CLOCK','PAYROLL REGISTER',
+  'EARNINGS STATEMENT','BENEFITS SETUP','TAX SETUP',
+  'DIRECT DEPOSIT','BACK OFFICE'
+];
+
+const ESC_MENU = ['EDIT','ADD EMPLOYEE','DELETE EMPLOYEE','ONBOARDING','HOME',...HOME_MENU];
+
+const PROFILE_FIELDS = [
+  { key:'legalName',      label:'LEGAL NAME',      upper:true  },
+  { key:'preferredName',  label:'PREFERRED NAME',  upper:true  },
+  { key:'pronouns',       label:'PRONOUNS',        upper:true  },
+  { key:'dob',            label:'DOB',             upper:false },
+  { key:'ssn',            label:'SSN',             upper:false },
+  { key:'phone',          label:'PHONE',           upper:false },
+  { key:'email',          label:'EMAIL',           upper:false },
+  { key:'address1',       label:'ADDRESS 1',       upper:true  },
+  { key:'address2',       label:'ADDRESS 2',       upper:true  },
+  { key:'city',           label:'CITY',            upper:true  },
+  { key:'state',          label:'STATE',           upper:true  },
+  { key:'zip',            label:'ZIP',             upper:false },
+  { key:'emergencyName',  label:'EMERGENCY NAME',  upper:true  },
+  { key:'emergencyPhone', label:'EMERGENCY PHONE', upper:false },
+  { key:'emergencyRel',   label:'RELATIONSHIP',    upper:true  },
+  { key:'department',     label:'DEPARTMENT',      upper:true  },
+  { key:'position',       label:'POSITION',        upper:true  },
+  { key:'employeeType',   label:'EMP TYPE',        upper:true  },
+  { key:'startDate',      label:'START DATE',      upper:false },
+  { key:'pay',            label:'PAY/HR',          upper:false },
+  { key:'status',         label:'STATUS',          upper:true  },
+  { key:'notes',          label:'NOTES',           upper:false }
+];
+
+// ═══════════════════════════════════════════════════════════
+//  TAX ENGINE  (2024 IRS tables)
+// ═══════════════════════════════════════════════════════════
+const TAX = {
+  fedBrackets: {
+    SINGLE:[
+      {min:0,max:11600,r:.10},{min:11600,max:47150,r:.12},
+      {min:47150,max:100525,r:.22},{min:100525,max:191950,r:.24},
+      {min:191950,max:243725,r:.32},{min:243725,max:609350,r:.35},
+      {min:609350,max:1e12,r:.37}
+    ],
+    MARRIED:[
+      {min:0,max:23200,r:.10},{min:23200,max:94300,r:.12},
+      {min:94300,max:201050,r:.22},{min:201050,max:383900,r:.24},
+      {min:383900,max:487450,r:.32},{min:487450,max:731200,r:.35},
+      {min:731200,max:1e12,r:.37}
+    ]
+  },
+  stdDed:{ SINGLE:14600, MARRIED:29200 },
+  allowVal: 4700,
+  ssRate:.062, ssCap:168600,
+  medRate:.0145, medSurRate:.009, medSurThresh:200000,
+  futaRate:.006, futaCap:7000
+};
+
+function r2(v){ return Math.round(v*100)/100; }
+
+function calcFedTax(annualTaxable, filing){
+  const brackets = TAX.fedBrackets[filing] || TAX.fedBrackets.SINGLE;
+  let tax=0;
+  for(const b of brackets){
+    if(annualTaxable>b.min) tax+=(Math.min(annualTaxable,b.max)-b.min)*b.r;
+  }
+  return tax;
+}
+
+function calcPeriodTaxes(grossPay, emp, ytdSoFar){
+  const b = emp.benefits, ti = emp.taxInfo;
+  // Pre-tax reduces federal/state taxable income
+  const preTax = r2((b.k401pct/100)*grossPay + b.hsaAmt + b.fsaAmt);
+  const taxable = Math.max(0, grossPay - preTax);
+
+  // Annualise for bracket lookup (26 bi-weekly periods)
+  const annualTaxable = taxable * 26;
+  const annualStdDed  = TAX.stdDed[ti.filing] || TAX.stdDed.SINGLE;
+  const annualAllow   = ti.allowances * TAX.allowVal;
+  const fedTaxable    = Math.max(0, annualTaxable - annualStdDed - annualAllow);
+  const fedAnnual     = calcFedTax(fedTaxable, ti.filing);
+  const federal       = r2(fedAnnual / 26 + ti.extraWithhold);
+
+  // FICA — respect wage caps using YTD
+  const ssEligible = Math.max(0, Math.min(grossPay, TAX.ssCap - (ytdSoFar.ssWages||0)));
+  const ss         = r2(ssEligible * TAX.ssRate);
+  const medicare   = r2(grossPay * TAX.medRate);
+  const ytdGrossAfter = (ytdSoFar.gross||0) + grossPay;
+  const medSur     = ytdGrossAfter > TAX.medSurThresh
+    ? r2(Math.max(0, ytdGrossAfter - TAX.medSurThresh) * TAX.medSurRate
+       - Math.max(0, (ytdSoFar.gross||0) - TAX.medSurThresh) * TAX.medSurRate)
+    : 0;
+
+  const state  = r2(grossPay * (ti.stateRate||0.05));
+  const local  = r2(grossPay * (ti.localRate||0.01));
+  const sdi    = r2(grossPay * (ti.sdiRate||0.001));
+
+  return { federal, ss, ssEligible, medicare, medSur, state, local, sdi,
+           preTax, taxable };
+}
+
+// ═══════════════════════════════════════════════════════════
+//  EMPLOYEE FACTORY
+// ═══════════════════════════════════════════════════════════
+let _nextId = 1;
+function makeEmp(name, role, pay){
+  const today = new Date().toLocaleDateString();
+  const display = String(name || 'NEW HIRE').substring(0, ENW).padEnd(ENW);
+  const roleTxt = String(role || 'STAFF').toUpperCase();
+  return {
+    id: _nextId++,
+    name: display,
+    role: roleTxt,
+    pay,
+    hireDate: today,
+    profile: {
+      legalName: String(name || 'NEW HIRE').toUpperCase(),
+      preferredName: String(name || 'NEW HIRE').toUpperCase(),
+      pronouns: '',
+      dob: '',
+      ssn: '',
+      phone: '',
+      email: '',
+      address1: '',
+      address2: '',
+      city: '',
+      state: '',
+      zip: '',
+      emergencyName: '',
+      emergencyPhone: '',
+      emergencyRel: '',
+      department: roleTxt,
+      position: roleTxt,
+      employeeType: 'FULL TIME',
+      startDate: today,
+      status: 'ACTIVE',
+      notes: ''
+    },
+    shifts: Array(7).fill("OFF"),
+    // ── Time Clock ──────────────────────────────────────
+    clock: {
+      status: 'OUT',          // 'IN' | 'OUT'
+      punchIn: null,           // Date ms of current punch-in
+      punchOut: null,
+      sessions: [],            // [{in, out, hrs}]
+      weekHrs: 0,              // accumulated this pay period
+      lastUpdated: null
+    },
+    // ── Benefits ────────────────────────────────────────
+    benefits: {
+      k401pct: 6, k401match: 3,
+      healthAmt: 125, dentalAmt: 25, visionAmt: 10, lifeAmt: 8.50,
+      hsaAmt: 50, fsaAmt: 0,
+      unionDues: 0,
+      garnishAmt: 0, garnishDesc: '',
+      otherAmt: 0, otherDesc: ''
+    },
+    // ── Tax Info ────────────────────────────────────────
+    taxInfo: {
+      filing: 'SINGLE', allowances: 1, extraWithhold: 0,
+      stateRate: 0.05, localRate: 0.01, sdiRate: 0.001
+    },
+    // ── PTO ─────────────────────────────────────────────
+    pto: {
+      vacBal: 40.0, vacUsed: 0, vacRate: 1.54,
+      sickBal: 24.0, sickUsed: 0, sickRate: 0.92,
+      personalBal: 3, personalUsed: 0,
+      holidayHrs: 0
+    },
+    // ── Direct Deposit ──────────────────────────────────
+    dd: { bank:'', account:'', routing:'', type:'CHECKING', enabled:false },
+    // ── YTD Accumulators ────────────────────────────────
+    ytd: {
+      gross:0, ssWages:0,
+      federal:0, ss:0, medicare:0, medSur:0,
+      state:0, local:0, sdi:0, extra:0,
+      k401:0, k401match:0, hsa:0, fsa:0,
+      health:0, dental:0, vision:0, life:0,
+      union:0, garnish:0, other:0,
+      netPay:0
+    },
+    statements: []
+  };
+}
+
+function syncProfile(emp){
+  if(!emp.profile) emp.profile = {};
+  const p = emp.profile;
+  const legal = String(p.legalName || p.preferredName || emp.name || 'NEW HIRE').trim();
+  const preferred = String(p.preferredName || legal).trim();
+  const roleTxt = String(p.position || p.department || emp.role || 'STAFF').trim().toUpperCase();
+  emp.name = String(preferred || legal || 'NEW HIRE').substring(0, ENW).padEnd(ENW);
+  emp.role = roleTxt;
+  if(p.pay !== undefined && p.pay !== '' && !Number.isNaN(parseFloat(p.pay))) emp.pay = parseFloat(p.pay);
+  p.legalName = p.legalName || legal.toUpperCase();
+  p.preferredName = p.preferredName || preferred.toUpperCase();
+  p.position = String(p.position || roleTxt).toUpperCase();
+  p.department = String(p.department || roleTxt).toUpperCase();
+  p.employeeType = String(p.employeeType || 'FULL TIME').toUpperCase();
+  p.status = String(p.status || 'ACTIVE').toUpperCase();
+  p.startDate = p.startDate || emp.hireDate || new Date().toLocaleDateString();
+  emp.hireDate = p.startDate;
+}
+
+function startOnboarding(){
+  const emp = makeEmp('NEW HIRE','STAFF',15.00);
+  emp.profile.status = 'ONBOARDING';
+  emp.profile.legalName = '';
+  emp.profile.preferredName = '';
+  emp.profile.pronouns = '';
+  emp.profile.dob = '';
+  emp.profile.ssn = '';
+  emp.profile.phone = '';
+  emp.profile.email = '';
+  emp.profile.address1 = '';
+  emp.profile.address2 = '';
+  emp.profile.city = '';
+  emp.profile.state = '';
+  emp.profile.zip = '';
+  emp.profile.emergencyName = '';
+  emp.profile.emergencyPhone = '';
+  emp.profile.emergencyRel = '';
+  emp.profile.department = 'STAFF';
+  emp.profile.position = 'STAFF';
+  emp.profile.employeeType = 'FULL TIME';
+  emp.profile.notes = '';
+  syncProfile(emp);
+  state.employees.push(emp);
+  state.curEmp = state.employees.length - 1;
+  state.curField = 0;
+  state.view = 'profile';
+  state.mode = 'normal';
+  state.menuOpen = false;
+  state.menuCur = 0;
+  state.profileSaved = false;
+  render();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  SEED DATA
+// ═══════════════════════════════════════════════════════════
+function seedEmp(name, role, pay, shifts, ddBank, ddAcct, ddRoute, ddOn, filing, allow, k401, health, vacBal, sickBal){
+  const e = makeEmp(name, role, pay);
+  e.shifts = shifts;
+  e.dd = { bank:ddBank, account:ddAcct, routing:ddRoute, type:'CHECKING', enabled:ddOn };
+  e.taxInfo.filing = filing; e.taxInfo.allowances = allow;
+  e.benefits.k401pct = k401; e.benefits.healthAmt = health;
+  e.pto.vacBal = vacBal; e.pto.sickBal = sickBal;
+  return e;
+}
+
+const state = {
+  view: 'home',
+  employees: [
+    seedEmp("ALICE","MANAGER",25.50,["6a-3p","OFF","6a-3p","6a-3p","10a-7p","10a-7p","OFF"],"FIRST BANK","****1234","021000021",true,"SINGLE",1,8,150,80,32),
+    seedEmp("BOB","CASHIER",15.00,["2p-11p","2p-11p","OFF","2p-11p","OFF","2p-11p","2p-11p"],"SECOND BANK","****5678","021000022",false,"SINGLE",0,6,125,40,24),
+    seedEmp("CAROL","STOCKER",16.50,["6a-3p","6a-3p","6a-3p","OFF","6a-3p","OFF","6a-3p"],"THIRD BANK","****9012","021000023",true,"MARRIED",2,6,125,40,24),
+    seedEmp("DAVE","CASHIER",15.00,["10a-7p","10a-7p","10a-7p","OFF","6a-3p","6a-3p","OFF"],"FIRST BANK","****3456","021000021",true,"SINGLE",1,6,125,40,24)
+  ],
+  curEmp: 0, curDay: 0, curField: 0,
+  mode: 'normal', editBuf: '', editCur: 0,
+  menuOpen: false, menuCur: 0,
+  stmtIdx: 0,
+  payrollConfirm: false,   // waiting for 'all' or single confirm
+  clockTick: 0,            // incremented by background timer
+  isFullscreen: false
+};
+
+// ═══════════════════════════════════════════════════════════
+//  BACKGROUND TIME CLOCK  (updates every 30 s)
+// ═══════════════════════════════════════════════════════════
+function tickClock(){
+  const now = Date.now();
+  state.employees.forEach(emp => {
+    if(emp.clock.status === 'IN' && emp.clock.punchIn){
+      const hrs = (now - emp.clock.punchIn) / 3600000;
+      emp.clock.weekHrs = r2(
+        emp.clock.sessions.reduce((s,ss)=>s+ss.hrs,0) + hrs
+      );
+      emp.clock.lastUpdated = now;
+    }
+  });
+  state.clockTick++;
+  if(state.view === 'time clock' || state.view === 'payroll register'){
+    render();
+  }
+}
+setInterval(tickClock, 30000);
+
+function clockIn(emp){
+  if(emp.clock.status === 'IN') return;
+  emp.clock.punchIn  = Date.now();
+  emp.clock.punchOut = null;
+  emp.clock.status   = 'IN';
+}
+
+function clockOut(emp){
+  if(emp.clock.status !== 'IN') return;
+  const now = Date.now();
+  const hrs = r2((now - emp.clock.punchIn) / 3600000);
+  emp.clock.sessions.push({ in: emp.clock.punchIn, out: now, hrs });
+  emp.clock.punchOut = now;
+  emp.clock.status   = 'OUT';
+  emp.clock.weekHrs  = r2(emp.clock.sessions.reduce((s,ss)=>s+ss.hrs,0));
+}
+
+function getEffectiveHours(emp){
+  // Prefer actual clocked hours; fall back to scheduled hours
+  if(emp.clock.weekHrs > 0) return emp.clock.weekHrs;
+  return getScheduledHours(emp);
+}
+
+function getScheduledHours(emp){
+  return emp.shifts.reduce((t,sh)=>t+parseShift(sh),0);
+}
+
+function parseShift(sh){
+  if(!sh||sh==='OFF') return 0;
+  const m = sh.match(/(\d+)([ap])-(\d+)([ap])/i);
+  if(!m) return 0;
+  let s=parseInt(m[1]),sp=m[2].toLowerCase(),e=parseInt(m[3]),ep=m[4].toLowerCase();
+  if(sp==='p'&&s!==12)s+=12; if(sp==='a'&&s===12)s=0;
+  if(ep==='p'&&e!==12)e+=12; if(ep==='a'&&e===12)e=0;
+  let d=e-s; if(d<0)d+=24; return d;
+}
+
+function fmtTime(ms){
+  if(!ms) return '--:-- --';
+  return new Date(ms).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
+}
+
+function fmtHrs(h){ return h.toFixed(2)+'h'; }
+
+// ═══════════════════════════════════════════════════════════
+//  EARNINGS STATEMENT GENERATOR
+// ═══════════════════════════════════════════════════════════
+function generateStatement(emp){
+  const totalHrs  = getEffectiveHours(emp);
+  const regHrs    = Math.min(totalHrs, 40);
+  const otHrs     = Math.max(0, totalHrs - 40);
+  const vacHrs    = emp.pto.vacUsed;
+  const sickHrs   = emp.pto.sickUsed;
+  const holHrs    = emp.pto.holidayHrs;
+
+  const regPay    = r2(regHrs  * emp.pay);
+  const otPay     = r2(otHrs   * emp.pay * 1.5);
+  const vacPay    = r2(vacHrs  * emp.pay);
+  const sickPay   = r2(sickHrs * emp.pay);
+  const holPay    = r2(holHrs  * emp.pay);
+  const grossPay  = r2(regPay + otPay + vacPay + sickPay + holPay);
+
+  const b  = emp.benefits;
+  const tx = calcPeriodTaxes(grossPay, emp, emp.ytd);
+
+  const k401      = r2((b.k401pct/100) * grossPay);
+  const k401match = r2((b.k401match/100) * grossPay);
+  const hsa       = r2(b.hsaAmt);
+  const fsa       = r2(b.fsaAmt);
+  const health    = r2(b.healthAmt);
+  const dental    = r2(b.dentalAmt);
+  const vision    = r2(b.visionAmt);
+  const life      = r2(b.lifeAmt);
+  const union     = r2(b.unionDues);
+  const garnish   = r2(b.garnishAmt);
+  const other     = r2(b.otherAmt);
+
+  const totalPreTax  = r2(k401 + hsa + fsa);
+  const totalTaxes   = r2(tx.federal + tx.ss + tx.medicare + tx.medSur + tx.state + tx.local + tx.sdi);
+  const totalPostTax = r2(health + dental + vision + life + union + garnish + other);
+  const totalDed     = r2(totalPreTax + totalTaxes + totalPostTax);
+  const netPay       = r2(grossPay - totalDed);
+
+  // Accrue PTO
+  emp.pto.vacBal  = r2(emp.pto.vacBal  + emp.pto.vacRate);
+  emp.pto.sickBal = r2(emp.pto.sickBal + emp.pto.sickRate);
+
+  // Update YTD
+  const y = emp.ytd;
+  y.gross    += grossPay; y.ssWages  += tx.ssEligible;
+  y.federal  += tx.federal; y.ss     += tx.ss;
+  y.medicare += tx.medicare; y.medSur+= tx.medSur;
+  y.state    += tx.state; y.local    += tx.local;
+  y.sdi      += tx.sdi;
+  y.k401     += k401; y.k401match   += k401match;
+  y.hsa      += hsa; y.fsa          += fsa;
+  y.health   += health; y.dental    += dental;
+  y.vision   += vision; y.life      += life;
+  y.union    += union; y.garnish    += garnish;
+  y.other    += other; y.netPay     += netPay;
+
+  // Reset period PTO usage after statement
+  emp.pto.vacUsed = 0; emp.pto.sickUsed = 0;
+  emp.pto.holidayHrs = 0;
+  // Reset clock for new period
+  emp.clock.sessions = [];
+  emp.clock.weekHrs  = 0;
+
+  const stmt = {
+    date: new Date().toLocaleDateString(),
+    period: `PAY PERIOD ${emp.statements.length+1}`,
+    earnings: { regHrs,regPay,otHrs,otPay,vacHrs,vacPay,sickHrs,sickPay,holHrs,holPay,grossPay },
+    preTax:  { k401,k401match,hsa,fsa,totalPreTax },
+    taxes:   { ...tx, totalTaxes },
+    postTax: { health,dental,vision,life,union,garnish,garnishDesc:b.garnishDesc,other,otherDesc:b.otherDesc,totalPostTax },
+    totalDed, netPay,
+    ptoSnap: { vacBal:emp.pto.vacBal, sickBal:emp.pto.sickBal, personalBal:emp.pto.personalBal-emp.pto.personalUsed },
+    ytdSnap: JSON.parse(JSON.stringify(y)),
+    ddLine:  emp.dd.enabled ? `${emp.dd.bank} ${emp.dd.account} (${emp.dd.type})` : 'CHECK'
+  };
+  emp.statements.push(stmt);
+  return stmt;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  HELPERS
+// ═══════════════════════════════════════════════════════════
+function esc(t){ return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function pad(v,n){ return String(v).padEnd(n).substring(0,n); }
+function cell(val, active){
+  const s = esc(val);
+  return active ? `<span class="hi cur">${s}</span>` : s;
+}
+
+function calcStats(){
+  let schHrs=0,schCost=0,actHrs=0,actCost=0;
+  state.employees.forEach(e=>{
+    const sh=getScheduledHours(e), ah=e.clock.weekHrs;
+    schHrs+=sh; schCost+=sh*e.pay;
+    actHrs+=ah; actCost+=ah*e.pay;
+  });
+  return {schHrs,schCost,actHrs,actCost};
+}
+
+// ═══════════════════════════════════════════════════════════
+//  RENDER ENGINE
+// ═══════════════════════════════════════════════════════════
+function render(){
+  const W = 50;
+  let lines = [];
+
+  lines.push("".padEnd(W,'─'));
+  const titles = {
+    home:'C64 SMART SCHEDULER PRO', personnel:'PERSONNEL', profile:'PERSONNEL PROFILE',
+    scheduler:'WEEKLY SCHEDULER', 'time clock':'TIME CLOCK',
+    'payroll register':'PAYROLL REGISTER', 'earnings statement':'EARNINGS STATEMENT',
+    'benefits setup':'BENEFITS SETUP', 'tax setup':'TAX SETUP',
+    'direct deposit':'DIRECT DEPOSIT', 'back office':'BACK OFFICE'
+  };
+  const title = titles[state.view] || state.view.toUpperCase();
+  lines.push(title.padStart(Math.floor((W+title.length)/2)).padEnd(W));
+  lines.push("".padEnd(W,'─'));
+
+  switch(state.view){
+    case 'home':              renderHome(lines,W); break;
+    case 'personnel':         renderPersonnel(lines,W); break;
+    case 'profile':           renderProfile(lines,W); break;
+    case 'scheduler':         renderScheduler(lines,W); break;
+    case 'time clock':        renderTimeClock(lines,W); break;
+    case 'payroll register':  renderPayrollRegister(lines,W); break;
+    case 'earnings statement':renderEarningsStatement(lines,W); break;
+    case 'benefits setup':    renderBenefits(lines,W); break;
+    case 'tax setup':         renderTaxSetup(lines,W); break;
+    case 'direct deposit':    renderDD(lines,W); break;
+    case 'back office':       renderBackOffice(lines,W); break;
+  }
+
+  lines.push("".padEnd(W,'─'));
+  if(state.view!=='home') lines.push("ARROWS:MOVE  ENTER:SELECT/EDIT  ESC:HOME");
+
+  if(state.mode==='normal' && !state.menuOpen && state.view!=='home'){
+    lines.push(""); lines.push("READY.<span class=\"cmd-cur\"></span>");
+  }
+
+  // ESC menu overlay
+  if(state.menuOpen){
+    lines.push(""); lines.push("╔"+"═".repeat(W-2)+"╗");
+    ESC_MENU.forEach((opt,i)=>{
+      const s = i===state.menuCur;
+      lines.push("║ "+(s?`<span class="hi">${esc(opt)}</span>`:esc(opt)).padEnd(W-4)+" ║");
+    });
+    lines.push("╚"+"═".repeat(W-2)+"╝");
+  }
+
+  // Edit overlay
+  if(state.mode==='edit'){
+    const empN = state.employees[state.curEmp].name.trim();
+    const lbl  = getEditLabel();
+    const before = state.editBuf.substring(0,state.editCur);
+    const at     = state.editBuf.charAt(state.editCur)||' ';
+    const after  = state.editBuf.substring(state.editCur+1);
+    const editRow= `${esc(empN)} ${lbl}: ${esc(before)}<span class="blink hi">${esc(at)}</span>${esc(after)}`;
+    lines.push(""); lines.push("╔"+"═".repeat(W-2)+"╗");
+    lines.push("║ "+editRow+" ║");
+    lines.push("╚"+"═".repeat(W-2)+"╝");
+    lines.push("ENTER=SAVE  ESC=CANCEL");
+  }
+
+  screen.innerHTML = lines.map(l=>`<div class="row">${l}</div>`).join('');
+}
+
+// ─── VIEW RENDERERS ────────────────────────────────────────
+
+function renderHome(lines,W){
+  lines.push(""); lines.push("MAIN MENU:"); lines.push("");
+  HOME_MENU.forEach((item,i)=>{
+    const s = i===state.menuCur;
+    lines.push(s?`<span class="hi"> ▶ ${esc(item)} </span>`:`   ${esc(item)}`);
+  });
+  lines.push(""); lines.push("READY.<span class=\"cmd-cur\"></span>");
+}
+
+function renderPersonnel(lines,W){
+  lines.push("ID  NAME       ROLE       PAY/HR  STATUS");
+  lines.push("──  ────────── ────────── ──────  ──────");
+  state.employees.forEach((emp,e)=>{
+    const active = state.mode==='normal' && !state.menuOpen;
+    const profStatus = String(emp.profile?.status || 'ACTIVE').toUpperCase();
+    const clkSt  = profStatus==='ONBOARDING'
+      ? `<span class="blink clocked-out">ONB </span>`
+      : emp.clock.status==='IN'
+        ? `<span class="clocked-in">IN  </span>`
+        : `<span class="clocked-out">OUT </span>`;
+    let row = pad(emp.id,4);
+    row += cell(pad(emp.name,11), active&&e===state.curEmp&&state.curField===0);
+    row += cell(pad(emp.role||'STAFF',11), active&&e===state.curEmp&&state.curField===1);
+    row += cell(pad('$'+emp.pay.toFixed(2),8), active&&e===state.curEmp&&state.curField===2);
+    row += clkSt;
+    lines.push(row);
+  });
+  lines.push("");
+  lines.push("ENTER=OPEN PROFILE  LEFT/RIGHT=FIELD  UP/DOWN=EMPLOYEE");
+}
+
+function renderProfile(lines,W){
+  const emp = state.employees[state.curEmp];
+  if(!emp){
+    lines.push("NO EMPLOYEE SELECTED.");
+    return;
+  }
+  syncProfile(emp);
+  const p = emp.profile;
+  const status = String(p.status || 'ACTIVE').toUpperCase();
+  lines.push(`EMPLOYEE #${emp.id}  ${status}`);
+  lines.push(`NAME: ${pad(emp.name.trim(),12)} ROLE: ${pad(emp.role,12)} PAY: $${emp.pay.toFixed(2)}/HR`);
+  lines.push(`START: ${p.startDate || emp.hireDate || '--'}  TYPE: ${p.employeeType || ''}`);
+  lines.push("".padEnd(W,'─'));
+  PROFILE_FIELDS.forEach((f,i)=>{
+    const isActive = state.mode==='normal' && !state.menuOpen && state.curField===i;
+    const raw = p[f.key];
+    const value = raw === undefined || raw === null ? '' : String(raw);
+    const row = pad(f.label,18)+': '+value;
+    lines.push(isActive ? `<span class="hi cur">${esc(row)}</span>` : esc(row));
+  });
+  lines.push("".padEnd(W,'─'));
+  lines.push("ENTER=EDIT FIELD  ↑↓=FIELD  ←→=EMPLOYEE");
+  lines.push(status==='ONBOARDING' ? "TAB=ACTIVATE PROFILE" : "ESC=PERSONNEL");
+}
+function renderScheduler(lines,W){
+  lines.push("EMPLOYEE   "+DAYS.map(d=>pad(d,SW)).join(''));
+  lines.push("".padEnd(ENW+1)+DAYS.map(()=>"─".repeat(SW)).join(''));
+  state.employees.forEach((emp,e)=>{
+    let row = pad(emp.name,ENW)+" ";
+    for(let d=0;d<7;d++){
+      const c = pad(emp.shifts[d]||"",SW);
+      row += cell(c, state.mode==='normal'&&!state.menuOpen&&e===state.curEmp&&d===state.curDay);
+    }
+    lines.push(row);
+  });
+}
+
+function renderTimeClock(lines,W){
+  const now = Date.now();
+  lines.push("EMPLOYEE   STATUS  PUNCH IN   PUNCH OUT  HRS");
+  lines.push("────────── ─────── ────────── ────────── ────");
+  state.employees.forEach((emp,e)=>{
+    const ck  = emp.clock;
+    const st  = ck.status==='IN'
+      ? `<span class="clocked-in">IN    </span>`
+      : `<span class="clocked-out">OUT   </span>`;
+    const inT  = ck.punchIn  ? fmtTime(ck.punchIn)  : '--:-- --';
+    const outT = ck.punchOut ? fmtTime(ck.punchOut) : '--:-- --';
+    let liveHrs = ck.weekHrs;
+    if(ck.status==='IN'&&ck.punchIn){
+      liveHrs = r2(ck.sessions.reduce((s,ss)=>s+ss.hrs,0)+(now-ck.punchIn)/3600000);
+    }
+    const hrsStr = fmtHrs(liveHrs);
+    const active = state.mode==='normal'&&!state.menuOpen&&e===state.curEmp;
+    let row = pad(emp.name,11)+st+pad(inT,11)+pad(outT,11)+hrsStr;
+    lines.push(active?`<span class="hi cur">${esc(row)}</span>`:esc(row));
+  });
+  lines.push("");
+  lines.push("ENTER=CLOCK IN/OUT  UP/DOWN=EMPLOYEE");
+  lines.push("HOURS AUTO-FLOW TO PAYROLL REGISTER");
+}
+
+function renderPayrollRegister(lines,W){
+  lines.push("EMPLOYEE   SCH.HRS  CLK.HRS  REG   OT   GROSS");
+  lines.push("────────── ──────── ──────── ───── ──── ──────");
+  let totGross=0;
+  state.employees.forEach((emp,e)=>{
+    const schH = getScheduledHours(emp);
+    const clkH = emp.clock.weekHrs;
+    const effH = getEffectiveHours(emp);
+    const reg  = Math.min(effH,40), ot=Math.max(0,effH-40);
+    const gross= r2(reg*emp.pay+ot*emp.pay*1.5);
+    totGross   += gross;
+    const active = state.mode==='normal'&&!state.menuOpen&&e===state.curEmp;
+    let row = pad(emp.name,11)+pad(schH.toFixed(1),9)+pad(clkH.toFixed(1),9)
+             +pad(reg.toFixed(1),6)+pad(ot.toFixed(1),5)+'$'+gross.toFixed(2);
+    lines.push(active?`<span class="hi cur">${esc(row)}</span>`:esc(row));
+  });
+  lines.push("".padEnd(W,'─'));
+  lines.push(`TOTAL GROSS PAYROLL: $${totGross.toFixed(2)}`);
+  lines.push("");
+  lines.push("ENTER=GENERATE STATEMENT FOR EMPLOYEE");
+  lines.push("TAB  =GENERATE ALL STATEMENTS AT ONCE");
+  lines.push("");
+  lines.push("* CLK.HRS AUTO-POPULATED FROM TIME CLOCK");
+  lines.push("* FALLS BACK TO SCHEDULED HRS IF NO CLOCK");
+}
+
+function renderEarningsStatement(lines,W){
+  const emp = state.employees[state.curEmp];
+  if(!emp.statements.length){
+    lines.push(`EMPLOYEE: ${emp.name.trim()}  (${emp.role})`);
+    lines.push(""); lines.push("NO STATEMENTS ON FILE.");
+    lines.push(""); lines.push("GO TO PAYROLL REGISTER AND PRESS");
+    lines.push("ENTER TO GENERATE THIS EMPLOYEE'S");
+    lines.push("STATEMENT, OR TAB FOR ALL EMPLOYEES.");
+    return;
+  }
+  const s   = emp.statements[state.stmtIdx];
+  const er  = s.earnings, pt=s.preTax, tx=s.taxes, po=s.postTax, y=s.ytdSnap;
+
+  const col1=w=>String(w).padEnd(28), col2=v=>("$"+v.toFixed(2)).padEnd(11), col3=v=>"$"+v.toFixed(2);
+
+  lines.push(`${pad(emp.name.trim(),16)} ID:${emp.id}  ${s.period}`);
+  lines.push(`DEPT: ${pad(emp.role,12)} PAY DATE: ${s.date}`);
+  lines.push(`RATE: $${emp.pay.toFixed(2)}/HR   FILING: ${emp.taxInfo.filing}`);
+  lines.push("".padEnd(W,'═'));
+
+  // EARNINGS
+  lines.push("EARNINGS                    CURRENT     YTD");
+  lines.push("─────────────────────────── ─────────── ──────────");
+  const earningsRows=[
+    ["REGULAR PAY",`${er.regHrs}h x $${emp.pay.toFixed(2)}`,er.regPay,y.gross],
+  ];
+  lines.push(col1(`REGULAR  ${er.regHrs.toFixed(1)}h x $${emp.pay.toFixed(2)}`)+col2(er.regPay)+col3(y.gross));
+  if(er.otHrs>0)  lines.push(col1(`OVERTIME ${er.otHrs.toFixed(1)}h x $${(emp.pay*1.5).toFixed(2)}`)+col2(er.otPay)+"");
+  if(er.holHrs>0) lines.push(col1(`HOLIDAY  ${er.holHrs.toFixed(1)}h`)+col2(er.holPay)+"");
+  if(er.vacHrs>0) lines.push(col1(`VACATION ${er.vacHrs.toFixed(1)}h`)+col2(er.vacPay)+"");
+  if(er.sickHrs>0)lines.push(col1(`SICK PAY ${er.sickHrs.toFixed(1)}h`)+col2(er.sickPay)+"");
+  lines.push(col1("GROSS PAY")+col2(er.grossPay)+col3(y.gross));
+  lines.push("".padEnd(W,'─'));
+
+  // PRE-TAX
+  lines.push("PRE-TAX DEDUCTIONS          CURRENT     YTD");
+  lines.push("─────────────────────────── ─────────── ──────────");
+  lines.push(col1(`401(K) ${emp.benefits.k401pct}%`)+col2(pt.k401)+col3(y.k401));
+  lines.push(col1(`401(K) MATCH ${emp.benefits.k401match}%`)+col2(pt.k401match)+col3(y.k401match));
+  if(pt.hsa>0) lines.push(col1("HSA CONTRIBUTION")+col2(pt.hsa)+col3(y.hsa));
+  if(pt.fsa>0) lines.push(col1("FSA CONTRIBUTION")+col2(pt.fsa)+col3(y.fsa));
+  lines.push("".padEnd(W,'─'));
+
+  // TAXES
+  lines.push("STATUTORY TAXES             CURRENT     YTD");
+  lines.push("─────────────────────────── ─────────── ──────────");
+  lines.push(col1("FEDERAL INCOME TAX")+col2(tx.federal)+col3(y.federal));
+  lines.push(col1("SOCIAL SECURITY (6.2%)")+col2(tx.ss)+col3(y.ss));
+  lines.push(col1("MEDICARE (1.45%)")+col2(tx.medicare)+col3(y.medicare));
+  if(tx.medSur>0) lines.push(col1("MEDICARE SURCHARGE (0.9%)")+col2(tx.medSur)+col3(y.medSur));
+  lines.push(col1(`STATE INCOME TAX (${(emp.taxInfo.stateRate*100).toFixed(1)}%)`)+col2(tx.state)+col3(y.state));
+  lines.push(col1(`LOCAL/CITY TAX (${(emp.taxInfo.localRate*100).toFixed(1)}%)`)+col2(tx.local)+col3(y.local));
+  if(tx.sdi>0) lines.push(col1("STATE DISABILITY (SDI)")+col2(tx.sdi)+col3(y.sdi));
+  if(emp.taxInfo.extraWithhold>0) lines.push(col1("ADDTL WITHHOLDING")+col2(emp.taxInfo.extraWithhold)+col3(y.extra));
+  lines.push("".padEnd(W,'─'));
+
+  // POST-TAX
+  lines.push("POST-TAX DEDUCTIONS         CURRENT     YTD");
+  lines.push("─────────────────────────── ─────────── ──────────");
+  if(po.health>0) lines.push(col1("MEDICAL INSURANCE")+col2(po.health)+col3(y.health));
+  if(po.dental>0) lines.push(col1("DENTAL INSURANCE")+col2(po.dental)+col3(y.dental));
+  if(po.vision>0) lines.push(col1("VISION INSURANCE")+col2(po.vision)+col3(y.vision));
+  if(po.life>0)   lines.push(col1("LIFE / AD&D")+col2(po.life)+col3(y.life));
+  if(po.union>0)  lines.push(col1("UNION DUES")+col2(po.union)+col3(y.union));
+  if(po.garnish>0)lines.push(col1(`GARNISHMENT (${po.garnishDesc||'COURT'})`)+col2(po.garnish)+col3(y.garnish));
+  if(po.other>0)  lines.push(col1(po.otherDesc||'OTHER DEDUCTION')+col2(po.other)+col3(y.other));
+  lines.push("".padEnd(W,'═'));
+
+  lines.push(col1("TOTAL DEDUCTIONS")+col2(s.totalDed)+"");
+  lines.push(col1("NET PAY")+col2(s.netPay)+"");
+  lines.push(`PAYMENT METHOD: ${s.ddLine}`);
+  lines.push("".padEnd(W,'─'));
+
+  // PTO
+  lines.push("LEAVE BALANCES");
+  lines.push(`  VACATION: ${s.ptoSnap.vacBal.toFixed(1)}h  SICK: ${s.ptoSnap.sickBal.toFixed(1)}h  PERSONAL: ${s.ptoSnap.personalBal}d`);
+  lines.push("".padEnd(W,'─'));
+
+  // YTD summary
+  lines.push("YEAR-TO-DATE SUMMARY");
+  lines.push(`  GROSS: $${y.gross.toFixed(2)}   TAXES: $${(y.federal+y.ss+y.medicare+y.medSur+y.state+y.local+y.sdi).toFixed(2)}   NET: $${y.netPay.toFixed(2)}`);
+
+  if(emp.statements.length>1){
+    lines.push(""); lines.push(`STMT ${state.stmtIdx+1}/${emp.statements.length}  LEFT/RIGHT TO BROWSE`);
+  }
+}
+
+function renderBenefits(lines,W){
+  lines.push("EMPLOYEE   401K% HLTH   DNTL  VSN  LIFE  HSA");
+  lines.push("────────── ───── ────── ───── ──── ───── ────");
+  state.employees.forEach((emp,e)=>{
+    const b=emp.benefits, active=state.mode==='normal'&&!state.menuOpen;
+    let row=pad(emp.name,11);
+    const flds=[
+      pad(b.k401pct+'%',6), pad('$'+b.healthAmt,7), pad('$'+b.dentalAmt,6),
+      pad('$'+b.visionAmt,5), pad('$'+b.lifeAmt,6), pad('$'+b.hsaAmt,4)
+    ];
+    flds.forEach((v,i)=>{ row+=cell(v,active&&e===state.curEmp&&i===state.curField); });
+    lines.push(row);
+  });
+  if(state.employees.length){
+    const b=state.employees[state.curEmp].benefits;
+    lines.push(""); lines.push(`FSA:$${b.fsaAmt}  UNION:$${b.unionDues}  GARNISH:$${b.garnishAmt}(${b.garnishDesc||'N/A'})`);
+    lines.push(`OTHER:$${b.otherAmt}(${b.otherDesc||'N/A'})`);
+  }
+}
+
+function renderTaxSetup(lines,W){
+  lines.push("EMPLOYEE   FILING  ALLOW EXTRA  ST%   LOC%  SDI%");
+  lines.push("────────── ─────── ───── ────── ───── ───── ────");
+  state.employees.forEach((emp,e)=>{
+    const ti=emp.taxInfo, active=state.mode==='normal'&&!state.menuOpen;
+    let row=pad(emp.name,11);
+    const flds=[
+      pad(ti.filing,8), pad(ti.allowances,6), pad('$'+ti.extraWithhold,7),
+      pad((ti.stateRate*100).toFixed(1)+'%',6), pad((ti.localRate*100).toFixed(1)+'%',6),
+      pad((ti.sdiRate*100).toFixed(2)+'%',4)
+    ];
+    flds.forEach((v,i)=>{ row+=cell(v,active&&e===state.curEmp&&i===state.curField); });
+    lines.push(row);
+  });
+}
+
+function renderDD(lines,W){
+  lines.push("EMPLOYEE   BANK       ACCOUNT    TYPE     ON");
+  lines.push("────────── ────────── ────────── ──────── ──");
+  state.employees.forEach((emp,e)=>{
+    const dd=emp.dd, active=state.mode==='normal'&&!state.menuOpen;
+    let row=pad(emp.name,11);
+    const flds=[
+      pad(dd.bank,11), pad(dd.account,11), pad(dd.type,9), pad(dd.enabled?'YES':'NO',2)
+    ];
+    flds.forEach((v,i)=>{ row+=cell(v,active&&e===state.curEmp&&i===state.curField); });
+    lines.push(row);
+  });
+}
+
+function renderBackOffice(lines,W){
+  const st=calcStats();
+  lines.push("WEEKLY LABOR SUMMARY");
+  lines.push("".padEnd(W,'─'));
+  lines.push(`EMPLOYEES:       ${state.employees.length}`);
+  lines.push(`SCHEDULED HRS:   ${st.schHrs.toFixed(1)}`);
+  lines.push(`SCHEDULED COST:  $${st.schCost.toFixed(2)}`);
+  lines.push(`ACTUAL CLK HRS:  ${st.actHrs.toFixed(1)}`);
+  lines.push(`ACTUAL COST:     $${st.actCost.toFixed(2)}`);
+  lines.push(`VARIANCE:        $${(st.actCost-st.schCost).toFixed(2)}`);
+  lines.push("".padEnd(W,'─'));
+  lines.push("YTD PAYROLL TOTALS");
+  const totals = state.employees.reduce((a,e)=>({
+    gross:a.gross+e.ytd.gross, net:a.net+e.ytd.netPay,
+    fed:a.fed+e.ytd.federal, fica:a.fica+e.ytd.ss+e.ytd.medicare,
+    state:a.state+e.ytd.state
+  }),{gross:0,net:0,fed:0,fica:0,state:0});
+  lines.push(`GROSS PAYROLL:   $${totals.gross.toFixed(2)}`);
+  lines.push(`NET PAYROLL:     $${totals.net.toFixed(2)}`);
+  lines.push(`FEDERAL TAX:     $${totals.fed.toFixed(2)}`);
+  lines.push(`FICA:            $${totals.fica.toFixed(2)}`);
+  lines.push(`STATE TAX:       $${totals.state.toFixed(2)}`);
+  lines.push("".padEnd(W,'─'));
+  lines.push("DEPT BREAKDOWN");
+  const roles={};
+  state.employees.forEach(e=>roles[e.role]=(roles[e.role]||0)+1);
+  for(const r in roles) lines.push(`  ${pad(r,16)}: ${roles[r]} EMP`);
+}
+
+// ═══════════════════════════════════════════════════════════
+//  EDIT HELPERS
+// ═══════════════════════════════════════════════════════════
+function getEditLabel(){
+  const v=state.view, f=state.curField;
+  if(v==='scheduler') return DAYS[state.curDay];
+  if(v==='personnel') return ['NAME','ROLE','PAY/HR'][f]||'';
+  if(v==='profile') return (PROFILE_FIELDS[f] && PROFILE_FIELDS[f].label) || '';
+  if(v==='tax setup') return ['FILING','ALLOW','EXTRA','ST RATE','LOC RATE','SDI RATE'][f]||'';
+  if(v==='direct deposit') return ['BANK','ACCOUNT','ROUTING','TYPE','ENABLED'][f]||'';
+  if(v==='benefits setup') return ['401K%','HEALTH','DENTAL','VISION','LIFE','HSA','FSA','UNION','GARNISH','GARN DESC','OTHER','OTHER DESC'][f]||'';
+  return '';
+}
+
+function getEditValue(){
+  const emp=state.employees[state.curEmp], v=state.view, f=state.curField;
+  if(!emp) return '';
+  if(v==='scheduler') return emp.shifts[state.curDay]||'';
+  if(v==='personnel') return [emp.name.trim(),emp.role||'',String(emp.pay)][f]||'';
+  if(v==='profile'){
+    const key = PROFILE_FIELDS[f] && PROFILE_FIELDS[f].key;
+    if(!key) return '';
+    if(key === 'pay') return String(emp.pay);
+    return String(emp.profile?.[key] ?? '');
+  }
+  if(v==='tax setup'){
+    const ti=emp.taxInfo;
+    return [ti.filing,String(ti.allowances),String(ti.extraWithhold),String(ti.stateRate),String(ti.localRate),String(ti.sdiRate)][f]||'';
+  }
+  if(v==='direct deposit'){
+    const dd=emp.dd;
+    return [dd.bank,dd.account,dd.routing,dd.type,dd.enabled?'YES':'NO'][f]||'';
+  }
+  if(v==='benefits setup'){
+    const b=emp.benefits;
+    return [String(b.k401pct),String(b.healthAmt),String(b.dentalAmt),String(b.visionAmt),String(b.lifeAmt),String(b.hsaAmt),String(b.fsaAmt),String(b.unionDues),String(b.garnishAmt),b.garnishDesc,String(b.otherAmt),b.otherDesc][f]||'';
+  }
+  return '';
+}
+
+function setEditValue(raw){
+  const emp=state.employees[state.curEmp], v=state.view, f=state.curField;
+  if(!emp) return;
+  const val=raw.trim(), uval=val.toUpperCase();
+  if(v==='scheduler'){ emp.shifts[state.curDay]=uval; return; }
+  if(v==='personnel'){
+    if(f===0) emp.name=uval.padEnd(ENW);
+    if(f===1) emp.role=uval;
+    if(f===2) emp.pay=parseFloat(val)||0;
+    return;
+  }
+  if(v==='profile'){
+    const def = PROFILE_FIELDS[f];
+    if(!def) return;
+    const key = def.key;
+    const out = def.upper ? uval : val;
+    if(key === 'pay'){
+      emp.pay = parseFloat(val)||0;
+    } else {
+      emp.profile[key] = out;
+      if(key === 'legalName' || key === 'preferredName'){
+        const src = String(emp.profile.preferredName || emp.profile.legalName || 'NEW HIRE').toUpperCase();
+        emp.name = src.substring(0,ENW).padEnd(ENW);
+      }
+      if(key === 'position' || key === 'department'){
+        emp.role = String(emp.profile.position || emp.profile.department || emp.role || 'STAFF').toUpperCase();
+      }
+      if(key === 'startDate' && val) emp.hireDate = val;
+      if(key === 'status') emp.profile.status = uval;
+    }
+    syncProfile(emp);
+    return;
+  }
+  if(v==='tax setup'){
+    const ti=emp.taxInfo;
+    if(f===0) ti.filing=uval;
+    if(f===1) ti.allowances=parseInt(val)||0;
+    if(f===2) ti.extraWithhold=parseFloat(val)||0;
+    if(f===3) ti.stateRate=parseFloat(val)||0;
+    if(f===4) ti.localRate=parseFloat(val)||0;
+    if(f===5) ti.sdiRate=parseFloat(val)||0;
+    return;
+  }
+  if(v==='direct deposit'){
+    const dd=emp.dd;
+    if(f===0) dd.bank=uval;
+    if(f===1) dd.account=uval;
+    if(f===2) dd.routing=uval;
+    if(f===3) dd.type=uval;
+    if(f===4) dd.enabled=(uval==='YES');
+    return;
+  }
+  if(v==='benefits setup'){
+    const b=emp.benefits;
+    if(f===0) b.k401pct=parseFloat(val)||0;
+    if(f===1) b.healthAmt=parseFloat(val)||0;
+    if(f===2) b.dentalAmt=parseFloat(val)||0;
+    if(f===3) b.visionAmt=parseFloat(val)||0;
+    if(f===4) b.lifeAmt=parseFloat(val)||0;
+    if(f===5) b.hsaAmt=parseFloat(val)||0;
+    if(f===6) b.fsaAmt=parseFloat(val)||0;
+    if(f===7) b.unionDues=parseFloat(val)||0;
+    if(f===8) b.garnishAmt=parseFloat(val)||0;
+    if(f===9) b.garnishDesc=val;
+    if(f===10) b.otherAmt=parseFloat(val)||0;
+    if(f===11) b.otherDesc=val;
+  }
+}
+
+function maxField(){
+  const v=state.view;
+  if(v==='scheduler') return 6;
+  if(v==='personnel') return 2;
+  if(v==='profile') return PROFILE_FIELDS.length-1;
+  if(v==='tax setup') return 5;
+  if(v==='direct deposit') return 4;
+  if(v==='benefits setup') return 11;
+  return 0;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  MENU HANDLER
+// ═══════════════════════════════════════════════════════════
+function handleMenuSel(){
+  let sel;
+  if(state.view==='home'){
+    sel = HOME_MENU[state.menuCur];
+  } else {
+    sel = ESC_MENU[state.menuCur];
+    state.menuOpen = false;
+  }
+
+  if(sel==='EDIT'){
+    if(!state.employees.length) return;
+    state.mode='edit';
+    state.editBuf=getEditValue();
+    state.editCur=state.editBuf.length;
+  } else if(sel==='ADD EMPLOYEE' || sel==='ONBOARDING'){
+    startOnboarding();
+    return;
+  } else if(sel==='DELETE EMPLOYEE'){
+    if(state.employees.length&&confirm('Delete employee?')){
+      state.employees.splice(state.curEmp,1);
+      state.curEmp=Math.max(0,state.curEmp-1);
+    }
+  } else if(sel==='HOME'){
+    state.view='home'; state.menuCur=0;
+  } else {
+    const map={
+      'PERSONNEL':'personnel','ONBOARDING':'profile','SCHEDULER':'scheduler','TIME CLOCK':'time clock',
+      'PAYROLL REGISTER':'payroll register','EARNINGS STATEMENT':'earnings statement',
+      'BENEFITS SETUP':'benefits setup','TAX SETUP':'tax setup',
+      'DIRECT DEPOSIT':'direct deposit','BACK OFFICE':'back office'
+    };
+    if(map[sel]){
+      state.view=map[sel];
+      state.curField=0;
+      state.stmtIdx=0;
+    }
+  }
+  render();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  KEY HANDLER
+// ═══════════════════════════════════════════════════════════
+function handleKey(key){
+  // ── HOME ──────────────────────────────────────────────
+  if(state.view==='home'){
+    if(key==='ArrowUp')   { if(state.menuCur>0) state.menuCur--; render(); return; }
+    if(key==='ArrowDown') { if(state.menuCur<HOME_MENU.length-1) state.menuCur++; render(); return; }
+    if(key==='Enter')     { handleMenuSel(); return; }
+    return;
+  }
+
+  // ── ESC MENU ──────────────────────────────────────────
+  if(state.menuOpen){
+    if(key==='Escape')    { state.menuOpen=false; render(); return; }
+    if(key==='ArrowUp')   { if(state.menuCur>0) state.menuCur--; render(); return; }
+    if(key==='ArrowDown') { if(state.menuCur<ESC_MENU.length-1) state.menuCur++; render(); return; }
+    if(key==='Enter')     { handleMenuSel(); return; }
+    return;
+  }
+
+  // ── EDIT MODE ─────────────────────────────────────────
+  if(state.mode==='edit'){
+    if(key==='Escape')    { state.mode='normal'; render(); return; }
+    if(key==='Enter')     { setEditValue(state.editBuf); state.mode='normal'; render(); return; }
+    if(key==='Backspace') {
+      if(state.editCur>0){ state.editBuf=state.editBuf.slice(0,state.editCur-1)+state.editBuf.slice(state.editCur); state.editCur--; }
+      render(); return;
+    }
+    if(key==='ArrowLeft') { if(state.editCur>0) state.editCur--; render(); return; }
+    if(key==='ArrowRight'){ if(state.editCur<state.editBuf.length) state.editCur++; render(); return; }
+    if(key.length===1&&/[ -~]/.test(key)){
+      state.editBuf=state.editBuf.slice(0,state.editCur)+key+state.editBuf.slice(state.editCur);
+      state.editCur++; render(); return;
+    }
+    return;
+  }
+
+  // ── PROFILE ───────────────────────────────────────────
+  if(state.view==='profile'){
+    if(key==='ArrowUp')   { if(state.curField>0) state.curField--; render(); return; }
+    if(key==='ArrowDown') { if(state.curField<PROFILE_FIELDS.length-1) state.curField++; render(); return; }
+    if(key==='ArrowLeft') { if(state.curEmp>0) { state.curEmp--; state.curField=Math.min(state.curField, PROFILE_FIELDS.length-1); } render(); return; }
+    if(key==='ArrowRight'){ if(state.curEmp<state.employees.length-1) { state.curEmp++; state.curField=Math.min(state.curField, PROFILE_FIELDS.length-1); } render(); return; }
+    if(key==='Enter'){
+      if(!state.employees.length) return;
+      state.mode='edit';
+      state.editBuf=getEditValue();
+      state.editCur=state.editBuf.length;
+      render(); return;
+    }
+    if(key==='Tab'){
+      const emp = state.employees[state.curEmp];
+      if(emp){
+        syncProfile(emp);
+        emp.profile.status = 'ACTIVE';
+        syncProfile(emp);
+      }
+      state.view='personnel';
+      state.curField=0;
+      render(); return;
+    }
+    if(key==='Escape'){ state.view='personnel'; render(); return; }
+    return;
+  }
+
+  // ── TIME CLOCK ────────────────────────────────────────
+  if(state.view==='time clock'){
+    if(key==='ArrowUp')   { if(state.curEmp>0) state.curEmp--; render(); return; }
+    if(key==='ArrowDown') { if(state.curEmp<state.employees.length-1) state.curEmp++; render(); return; }
+    if(key==='Enter'){
+      const emp=state.employees[state.curEmp];
+      if(emp.clock.status==='OUT') clockIn(emp); else clockOut(emp);
+      render(); return;
+    }
+    if(key==='Escape'){ state.view='home'; state.menuCur=0; render(); return; }
+    return;
+  }
+
+  // ── PAYROLL REGISTER ──────────────────────────────────
+  if(state.view==='payroll register'){
+    if(key==='ArrowUp')   { if(state.curEmp>0) state.curEmp--; render(); return; }
+    if(key==='ArrowDown') { if(state.curEmp<state.employees.length-1) state.curEmp++; render(); return; }
+    if(key==='Enter'){
+      const emp=state.employees[state.curEmp];
+      generateStatement(emp);
+      state.stmtIdx=emp.statements.length-1;
+      state.view='earnings statement';
+      render(); return;
+    }
+    if(key==='Tab'){
+      state.employees.forEach(e=>generateStatement(e));
+      state.stmtIdx=state.employees[state.curEmp].statements.length-1;
+      state.view='earnings statement';
+      render(); return;
+    }
+    if(key==='Escape'){ state.view='home'; state.menuCur=0; render(); return; }
+    return;
+  }
+
+  // ── EARNINGS STATEMENT ────────────────────────────────
+  if(state.view==='earnings statement'){
+    if(key==='ArrowUp')   { if(state.curEmp>0){ state.curEmp--; state.stmtIdx=Math.max(0,state.employees[state.curEmp].statements.length-1); } render(); return; }
+    if(key==='ArrowDown') { if(state.curEmp<state.employees.length-1){ state.curEmp++; state.stmtIdx=Math.max(0,state.employees[state.curEmp].statements.length-1); } render(); return; }
+    if(key==='ArrowLeft') { if(state.stmtIdx>0) state.stmtIdx--; render(); return; }
+    if(key==='ArrowRight'){ const stmts=state.employees[state.curEmp].statements; if(state.stmtIdx<stmts.length-1) state.stmtIdx++; render(); return; }
+    if(key==='Escape'){ state.view='home'; state.menuCur=0; render(); return; }
+    return;
+  }
+
+  // ── PERSONNEL LIST ────────────────────────────────────
+  if(state.view==='personnel'){
+    if(key==='Enter'){
+      if(!state.employees.length) return;
+      state.view='profile';
+      state.curField=0;
+      render(); return;
+    }
+  }
+
+  // ── NORMAL NAVIGATION ─────────────────────────────────
+  if(key==='Escape'){ state.view='home'; state.menuCur=0; render(); return; }
+  if(key==='ArrowUp')   { if(state.curEmp>0) state.curEmp--; render(); return; }
+  if(key==='ArrowDown') { if(state.curEmp<state.employees.length-1) state.curEmp++; render(); return; }
+  if(key==='ArrowLeft'){
+    if(state.view==='scheduler'){ if(state.curDay>0) state.curDay--; }
+    else { if(state.curField>0) state.curField--; }
+    render(); return;
+  }
+  if(key==='ArrowRight'){
+    if(state.view==='scheduler'){ if(state.curDay<6) state.curDay++; }
+    else { if(state.curField<maxField()) state.curField++; }
+    render(); return;
+  }
+  if(key==='Enter'){
+    if(!state.employees.length) return;
+    state.mode='edit';
+    state.editBuf=getEditValue();
+    state.editCur=state.editBuf.length;
+    render(); return;
+  }
+}
+
+function sk(k){ handleKey(k); }
+
+// ═══════════════════════════════════════════════════════════
+//  FULLSCREEN
+// ═══════════════════════════════════════════════════════════
+const screen = document.getElementById('c64-screen');
+const fsBtn  = document.getElementById('fullscreen-btn');
+fsBtn.addEventListener('click',()=>{
+  if(!document.fullscreenElement){
+    screen.requestFullscreen().catch(()=>{});
+    screen.classList.add('fullscreen');
+  } else {
+    document.exitFullscreen();
+    screen.classList.remove('fullscreen');
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════════
+function isMobile(){
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+}
+
+document.addEventListener('DOMContentLoaded',()=>{
+  if(isMobile()) document.getElementById('v-keys').classList.add('show');
+  screen.focus(); render();
+});
+
+screen.addEventListener('click',()=>screen.focus());
+
+document.addEventListener('keydown',(e)=>{
+  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Enter','Backspace','Escape','Tab'].includes(e.key))
+    e.preventDefault();
+  handleKey(e.key);
+});
+
+screen.focus(); render();
+</script>
+</body>
+</html>
+
 
 Ashenfall is a deterministic survival game prototype in Python, designed with a
 production-minded architecture so gameplay can scale while engine boundaries stay clean.
