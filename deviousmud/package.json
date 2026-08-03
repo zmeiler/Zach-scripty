@@ -1,0 +1,16 @@
+{
+  "name": "deviousmud",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DeviousMud - a family-friendly, tile-based HTML5 MMORPG with a zero-dependency Node.js game server.",
+  "type": "module",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node --test tests/"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,51 @@
+/**
+ * Recipes for the production skills: smelting (furnace), smithing (anvil) and
+ * cooking (fire or range).
+ */
+
+export const SMELTING = Object.freeze([
+  { id: 'bronze_bar', name: 'Bronze bar', level: 1, xp: 7, inputs: [{ id: 'copper_ore', count: 1 }, { id: 'tin_ore', count: 1 }] },
+  { id: 'iron_bar', name: 'Iron bar', level: 15, xp: 13, inputs: [{ id: 'iron_ore', count: 1 }], failChance: 0.45, failMessage: 'The ore is too impure and crumbles away.' },
+  { id: 'steel_bar', name: 'Steel bar', level: 30, xp: 18, inputs: [{ id: 'iron_ore', count: 1 }, { id: 'coal', count: 2 }] }
+]);
+
+export const SMITHING = Object.freeze([
+  { id: 'bronze_dagger', name: 'Bronze dagger', level: 1, xp: 13, bar: 'bronze_bar', bars: 1 },
+  { id: 'bronze_axe', name: 'Bronze axe', level: 1, xp: 13, bar: 'bronze_bar', bars: 1 },
+  { id: 'bronze_pickaxe', name: 'Bronze pickaxe', level: 2, xp: 13, bar: 'bronze_bar', bars: 1 },
+  { id: 'bronze_sword', name: 'Bronze sword', level: 4, xp: 25, bar: 'bronze_bar', bars: 2 },
+  { id: 'bronze_helm', name: 'Bronze helm', level: 7, xp: 25, bar: 'bronze_bar', bars: 2 },
+  { id: 'bronze_shield', name: 'Bronze shield', level: 12, xp: 38, bar: 'bronze_bar', bars: 3 },
+  { id: 'bronze_platelegs', name: 'Bronze platelegs', level: 16, xp: 50, bar: 'bronze_bar', bars: 4 },
+  { id: 'bronze_platebody', name: 'Bronze platebody', level: 18, xp: 63, bar: 'bronze_bar', bars: 5 },
+  { id: 'iron_sword', name: 'Iron sword', level: 19, xp: 50, bar: 'iron_bar', bars: 2 },
+  { id: 'steel_axe', name: 'Steel axe', level: 31, xp: 75, bar: 'steel_bar', bars: 1 },
+  { id: 'steel_pickaxe', name: 'Steel pickaxe', level: 32, xp: 75, bar: 'steel_bar', bars: 1 },
+  { id: 'steel_sword', name: 'Steel sword', level: 34, xp: 100, bar: 'steel_bar', bars: 2 },
+  { id: 'steel_helm', name: 'Steel helm', level: 37, xp: 100, bar: 'steel_bar', bars: 2 },
+  { id: 'steel_shield', name: 'Steel shield', level: 42, xp: 150, bar: 'steel_bar', bars: 3 },
+  { id: 'steel_platebody', name: 'Steel platebody', level: 48, xp: 250, bar: 'steel_bar', bars: 5 }
+]);
+
+export const COOKING = Object.freeze({
+  raw_shrimp: { result: 'shrimp', level: 1, xp: 30, burnStop: 34 },
+  raw_trout: { result: 'trout', level: 15, xp: 70, burnStop: 50 },
+  raw_salmon: { result: 'salmon', level: 25, xp: 90, burnStop: 58 }
+});
+
+/** Chance a cook burns the food, given their level and the cooking surface. */
+export function burnChance(recipe, level, onRange) {
+  if (level >= recipe.burnStop) return 0;
+  const span = Math.max(1, recipe.burnStop - recipe.level);
+  const progress = Math.min(1, Math.max(0, (level - recipe.level) / span));
+  const base = 0.55 * (1 - progress);
+  return Math.max(0, onRange ? base * 0.6 : base);
+}
+
+export function smeltingRecipe(id) {
+  return SMELTING.find((recipe) => recipe.id === id) || null;
+}
+
+export function smithingRecipe(id) {
+  return SMITHING.find((recipe) => recipe.id === id) || null;
+}
