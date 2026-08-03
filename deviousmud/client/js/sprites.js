@@ -554,9 +554,25 @@ const ICON_PAINTERS = {
     ctx.fillStyle = b; ctx.fillRect(w * 0.36, h * 0.62, w * 0.28, h * 0.06);
     ctx.fillStyle = '#5a3a1e'; ctx.fillRect(w * 0.45, h * 0.68, w * 0.1, h * 0.16);
   },
-  axe: (ctx, w, h, [a]) => {
-    ctx.fillStyle = '#5a3a1e'; ctx.fillRect(w * 0.46, h * 0.2, w * 0.08, h * 0.66);
-    ctx.fillStyle = a; ctx.beginPath(); ctx.moveTo(w * 0.5, h * 0.2); ctx.lineTo(w * 0.84, h * 0.3); ctx.lineTo(w * 0.5, h * 0.5); ctx.closePath(); ctx.fill();
+  axe: (ctx, w, h, [a, b]) => {
+    ctx.fillStyle = '#5a3a1e'; ctx.fillRect(w * 0.44, h * 0.22, w * 0.1, h * 0.62);
+    // A wedge with a curved cutting edge reads as an axe; a plain triangle
+    // reads as a flag on a pole.
+    ctx.fillStyle = a;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.5, h * 0.2);
+    ctx.quadraticCurveTo(w * 0.9, h * 0.24, w * 0.86, h * 0.44);
+    ctx.quadraticCurveTo(w * 0.78, h * 0.56, w * 0.5, h * 0.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = b;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.5, h * 0.2);
+    ctx.lineTo(w * 0.58, h * 0.21);
+    ctx.lineTo(w * 0.58, h * 0.5);
+    ctx.lineTo(w * 0.5, h * 0.5);
+    ctx.closePath();
+    ctx.fill();
   },
   pickaxe: (ctx, w, h, [a]) => {
     ctx.fillStyle = '#5a3a1e'; ctx.fillRect(w * 0.46, h * 0.2, w * 0.08, h * 0.66);
