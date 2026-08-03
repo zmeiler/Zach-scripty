@@ -26,6 +26,9 @@ npm start          # http://localhost:8080
 | `server/` | Node game server: WebSocket, static files, accounts |
 | `shared/` | Game data and the simulation engine, run by **both** sides |
 | `tests/` | Node test-runner suite (`npm test`) |
+| `tools/` | Single-file build, icon generation, Android asset sync |
+| `android/` | Android WebView wrapper — build an APK with one command |
+| `dist/` | Output of `npm run build`: the whole game as one HTML file |
 | `docs/DESIGN.md` | Full design specification: UI, mechanics, architecture, protocol |
 | `docs/DEVELOPMENT_LOG.md` | How it was built, what broke, and how it was fixed |
 
@@ -71,9 +74,11 @@ Node.js 18 or newer. Nothing else.
 ### Commands
 
 ```bash
-npm start        # start the server on port 8080
-npm run dev      # same, restarting on file changes (node --watch)
-npm test         # run the engine test suite
+npm start           # start the server on port 8080
+npm run dev         # same, restarting on file changes (node --watch)
+npm test            # run the engine test suite
+npm run build       # bundle the whole game into dist/deviousmud.html
+npm run android:sync # bundle into the Android app and refresh its icons
 ```
 
 ### Configuration
@@ -155,6 +160,27 @@ journalctl -u deviousmud -f
 
 Characters autosave every 30 seconds, on logout, and on `SIGTERM`, so
 `systemctl restart` never loses more than half a minute of progress.
+
+## Playing on a phone
+
+Three ways, in order of effort:
+
+1. **Install the web app.** Open the client in Chrome on the phone and choose
+   *Install app*, or press "Install on this device" on the title screen. You get
+   a home-screen icon, a full-screen window and offline play — the service
+   worker caches the game after the first visit. (Installing needs the page to
+   be served over https, or over http from localhost.)
+2. **Copy one file.** `npm run build` produces `dist/deviousmud.html`: the entire
+   game, about 300 KB, in a single document. Put it on the phone and open it
+   from Downloads. No install, no server, works in aeroplane mode.
+3. **Build the APK.** `android/` holds a small WebView wrapper.
+   `npm run android:sync && cd android && ./gradlew assembleDebug` produces
+   `app/build/outputs/apk/debug/app-debug.apk`. See `android/README.md` for
+   signing and for pointing the app at a multiplayer server.
+
+A packaged client (APK or a file opened from disk) has no server of its own. It
+plays solo by default, and can be pointed at one with
+`?server=192.168.1.20:8080`, which it then remembers.
 
 ### Static hosting (offline mode only)
 

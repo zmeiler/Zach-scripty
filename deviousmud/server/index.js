@@ -65,7 +65,14 @@ const httpServer = http.createServer(async (req, res) => {
         uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
         worldChecksum: world.checksum
       });
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+        // Public, read-only status. Packaged clients (the Android WebView shell,
+        // a page opened from disk) live on a different origin and must be able
+        // to ask whether this server is up before offering multiplayer.
+        'Access-Control-Allow-Origin': '*'
+      });
       res.end(body);
       return;
     }

@@ -1,0 +1,4 @@
+// Root build file. Plugin versions live here so the app module stays readable.
+plugins {
+    id 'com.android.application' version '8.7.3' apply false
+}

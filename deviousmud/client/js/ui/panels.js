@@ -10,7 +10,7 @@ import { levelProgress, xpForLevel } from '../../../shared/skills.js';
 import { ATTACK_STYLES } from '../../../shared/engine/combat.js';
 import { EMOTES } from '../../../shared/engine/game.js';
 import { actions } from '../actions.js';
-import { bus, state, saveSettings } from '../state.js';
+import { bus, pushChat, state, saveSettings } from '../state.js';
 import { itemIcon } from '../sprites.js';
 import { inventoryActions, openMenu } from './menu.js';
 
@@ -228,15 +228,13 @@ function buildSkills() {
     cell.addEventListener('click', () => {
       const entry = state.skills[skill];
       const next = xpForLevel(Math.min(99, entry.level + 1));
-      import('../state.js').then(({ pushChat }) =>
-        pushChat({
-          channel: 'game',
-          text: `${skill}: level ${entry.level}, ${Math.round(entry.xp).toLocaleString()} xp. ${
-            entry.level >= 99 ? 'Mastered!' : `${Math.max(0, Math.ceil(next - entry.xp)).toLocaleString()} xp to level ${entry.level + 1}.`
-          }`,
-          at: Date.now()
-        })
-      );
+      pushChat({
+        channel: 'game',
+        text: `${skill}: level ${entry.level}, ${Math.round(entry.xp).toLocaleString()} xp. ${
+          entry.level >= 99 ? 'Mastered!' : `${Math.max(0, Math.ceil(next - entry.xp)).toLocaleString()} xp to level ${entry.level + 1}.`
+        }`,
+        at: Date.now()
+      });
     });
     grid.append(cell);
   }

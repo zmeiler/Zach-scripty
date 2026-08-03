@@ -10,7 +10,10 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
-    "test": "node --test tests/"
+    "test": "node --test tests/*.test.js",
+    "build": "node tools/bundle.mjs",
+    "icons": "node tools/make-icons.mjs",
+    "android:sync": "node tools/sync-android.mjs"
   },
   "license": "MIT"
 }

@@ -1,0 +1,46 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.deviousmud.app'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.deviousmud.app"
+        minSdk 24              // Android 7.0; the WebView APIs used need nothing newer
+        targetSdk 35           // Android 15, what a Galaxy S25 ships with
+        versionCode 1
+        versionName "1.0"
+    }
+
+    buildTypes {
+        debug {
+            // Installable straight from `./gradlew assembleDebug` with no signing setup.
+            applicationIdSuffix ".debug"
+            versionNameSuffix "-debug"
+        }
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // Add a signingConfig here before publishing anywhere.
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // The game is plain HTML/CSS/JS in assets/ - never compress it twice.
+    androidResources {
+        noCompress 'html'
+    }
+}
+
+dependencies {
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.activity:activity:1.9.3'
+    implementation 'androidx.webkit:webkit:1.12.1'
+}

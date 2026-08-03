@@ -14,6 +14,37 @@ import { buildWorld } from '../../shared/world.js';
 import { Game } from '../../shared/engine/game.js';
 
 const SOLO_SAVE_KEY = 'deviousmud.solo.v1';
+const SERVER_KEY = 'deviousmud.server';
+
+/**
+ * Where to find the game server.
+ *
+ * Normally that is wherever the page came from. A packaged build (Android
+ * WebView, or a page opened from disk) has no useful origin, so it can be
+ * pointed at a server with `?server=192.168.1.20:8080`, which is remembered for
+ * next time.
+ */
+export function serverOverride() {
+  let value = '';
+  try {
+    value = new URLSearchParams(location.search).get('server') || '';
+  } catch {
+    value = '';
+  }
+  try {
+    if (value) localStorage.setItem(SERVER_KEY, value);
+    else value = localStorage.getItem(SERVER_KEY) || '';
+  } catch {
+    /* storage blocked - the query parameter still works for this session */
+  }
+  return value.replace(/^wss?:\/\//, '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+}
+
+function overrideSecure(host) {
+  // Plain http for private addresses (a phone talking to a PC on the sofa),
+  // https for anything routable.
+  return !/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host);
+}
 
 export class SocketTransport {
   constructor({ onMessage, onStatus }) {
@@ -28,6 +59,8 @@ export class SocketTransport {
   }
 
   static url() {
+    const override = serverOverride();
+    if (override) return `${overrideSecure(override) ? 'wss:' : 'ws:'}//${override}/ws`;
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${protocol}//${location.host}/ws`;
   }
@@ -214,10 +247,17 @@ export class SoloTransport {
 
 /** Quick reachability probe used by the title screen. */
 export async function probeServer(timeoutMs = 2500) {
+  const override = serverOverride();
+  // Opened straight from disk (or an Android WebView asset) with no server
+  // configured: attempting the fetch only logs a scary console error.
+  if (!override && !location.protocol.startsWith('http')) return null;
+  const endpoint = override
+    ? `${overrideSecure(override) ? 'https:' : 'http:'}//${override}/api/status`
+    : '/api/status';
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch('/api/status', { signal: controller.signal, cache: 'no-store' });
+    const res = await fetch(endpoint, { signal: controller.signal, cache: 'no-store' });
     if (!res.ok) return null;
     return await res.json();
   } catch {

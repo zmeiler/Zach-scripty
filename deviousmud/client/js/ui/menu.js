@@ -8,7 +8,7 @@
 import { OBJECT_TYPES } from '../../../shared/world.js';
 import { ITEMS, itemName } from '../../../shared/items.js';
 import { actions } from '../actions.js';
-import { state } from '../state.js';
+import { pushChat, state } from '../state.js';
 
 const menuEl = document.getElementById('contextMenu');
 let openFor = null;
@@ -104,7 +104,7 @@ function describeObject(type) {
 }
 
 function addLocalMessage(text) {
-  import('../state.js').then(({ pushChat }) => pushChat({ channel: 'game', text, at: Date.now() }));
+  pushChat({ channel: 'game', text, at: Date.now() });
 }
 
 export function openMenu(x, y, title, entries) {

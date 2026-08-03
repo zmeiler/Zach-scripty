@@ -47,6 +47,8 @@ async function boot() {
   initCreation(() => {});
   initAudio();
   wireTitleScreen();
+  registerServiceWorker();
+  wireInstallPrompt();
   applyAccessibility();
   document.body.classList.remove('loading');
 
@@ -64,6 +66,44 @@ async function boot() {
     const save = SoloTransport.loadSave(null);
     if (save?.name) document.getElementById('loginName').value = save.name;
   }
+}
+
+/** Offline support and "add to home screen" for the installed web app. */
+function registerServiceWorker() {
+  // The single-file build is its own offline copy - there is nothing to cache
+  // and no sw.js sitting next to it.
+  if (window.__DEVIOUSMUD_BUNDLED__) return;
+  if (!('serviceWorker' in navigator) || !location.protocol.startsWith('http')) return;
+  navigator.serviceWorker.register('./sw.js').catch((err) => {
+    console.info('Offline caching unavailable:', err.message);
+  });
+}
+
+function wireInstallPrompt() {
+  const button = document.getElementById('btnInstall');
+  if (!button) return;
+  let deferred = null;
+
+  window.addEventListener('beforeinstallprompt', (event) => {
+    // Chrome on Android: take over the prompt so it appears on our own button.
+    event.preventDefault();
+    deferred = event;
+    button.hidden = false;
+  });
+
+  button.addEventListener('click', async () => {
+    if (!deferred) return;
+    button.disabled = true;
+    deferred.prompt();
+    await deferred.userChoice;
+    deferred = null;
+    button.hidden = true;
+    button.disabled = false;
+  });
+
+  window.addEventListener('appinstalled', () => {
+    button.hidden = true;
+  });
 }
 
 function wireTitleScreen() {
