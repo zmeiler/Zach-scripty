@@ -65,7 +65,8 @@ export const state = {
   playerName: '',
   appearance: null,
 
-  self: { x: 48, y: 52, hp: 10, maxHp: 10, energy: 100, run: true, style: 'accurate', region: '', dead: false },
+  self: { x: 48, y: 52, plane: 0, hp: 10, maxHp: 10, energy: 100, run: true, style: 'accurate', region: '', dead: false },
+  plane: { plane: 0, id: 'surface', name: 'Emberfall', dark: 0, ambient: '#0a0f14' },
   players: new Map(),
   npcs: new Map(),
   groundItems: new Map(),
@@ -112,7 +113,28 @@ export function applyMessage(msg) {
       state.playerId = msg.id;
       state.playerName = msg.name;
       state.appearance = msg.appearance;
+      if (msg.plane) {
+        state.plane = msg.plane;
+        state.self.plane = msg.plane.plane;
+      }
       bus.emit('login', msg);
+      break;
+
+    // Sent the instant a ladder is used, ahead of the state message, so the
+    // renderer can swap planes and snap the camera in the same frame rather
+    // than easing across half the map.
+    case 'plane':
+      state.plane = msg;
+      state.self.plane = msg.plane;
+      state.self.x = msg.x;
+      state.self.y = msg.y;
+      state.players.clear();
+      state.npcs.clear();
+      state.groundItems.clear();
+      state.dynamicObjects.clear();
+      state.objectStates.clear();
+      state.splats.length = 0;
+      bus.emit('plane', msg);
       break;
 
     case 'state': {

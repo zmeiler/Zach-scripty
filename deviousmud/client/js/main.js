@@ -231,6 +231,17 @@ function startGame() {
   // used to cheat - it only exposes what this tab already knows.
   window.DEVIOUSMUD = { state, renderer, minimap, actions, world };
 
+  // A ladder is a teleport, not a walk: snap the camera instead of gliding it
+  // across the map, and drop the interpolation state of everything that was on
+  // the level we just left.
+  bus.on('plane', (info) => {
+    if (!renderer) return;
+    renderer.camX = info.x;
+    renderer.camY = info.y;
+    renderer.drawables = [];
+    renderer.hoverTile = null;
+  });
+
   window.addEventListener('resize', () => renderer.resize());
   const observer = new ResizeObserver(() => renderer.resize());
   observer.observe(document.getElementById('viewport'));

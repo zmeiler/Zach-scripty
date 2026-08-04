@@ -57,11 +57,33 @@ export const TILE = {
   ROCKFACE: 9,
   FLOWERS: 10,
   DARKGRASS: 11,
-  GRAVEL: 12
+  GRAVEL: 12,
+  // Underground. The mine reads as three distinct places, so each level gets
+  // its own floor and wall rather than re-tinting the same pair.
+  MINE_FLOOR: 13,
+  MINE_WALL: 14,
+  EMBER: 15,
+  CRYSTAL: 16,
+  VOID: 17
 };
 
 /** Tiles a character can never stand on. */
-export const BLOCKED_TILES = new Set([TILE.WATER, TILE.WALL, TILE.ROCKFACE]);
+export const BLOCKED_TILES = new Set([
+  TILE.WATER,
+  TILE.WALL,
+  TILE.ROCKFACE,
+  TILE.MINE_WALL,
+  TILE.CRYSTAL,
+  TILE.VOID
+]);
+
+/**
+ * The world has a vertical dimension. Plane 0 is the surface; 1-3 descend into
+ * the mine below Copper Hollow. Every entity carries a `plane`, and nothing on
+ * one plane can see, path to or hit anything on another.
+ */
+export const PLANE_COUNT = 4;
+export const SURFACE = 0;
 
 export const SKILLS = [
   'attack',

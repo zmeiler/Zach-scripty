@@ -994,6 +994,17 @@ function startGame() {
   // used to cheat - it only exposes what this tab already knows.
   window.DEVIOUSMUD = { state, renderer, minimap, actions, world };
 
+  // A ladder is a teleport, not a walk: snap the camera instead of gliding it
+  // across the map, and drop the interpolation state of everything that was on
+  // the level we just left.
+  bus.on('plane', (info) => {
+    if (!renderer) return;
+    renderer.camX = info.x;
+    renderer.camY = info.y;
+    renderer.drawables = [];
+    renderer.hoverTile = null;
+  });
+
   window.addEventListener('resize', () => renderer.resize());
   const observer = new ResizeObserver(() => renderer.resize());
   observer.observe(document.getElementById('viewport'));
@@ -1035,8 +1046,14 @@ __modules["shared/world.js"] = function (__exports, __require) {
  * the server and the browser run. That keeps the download small and means the
  * client never has to be sent 9,216 tiles, while still guaranteeing both sides
  * agree on every wall and tree (verified with a checksum at login).
+ *
+ * The world is a stack of *planes*. Plane 0 is the surface; planes 1-3 are the
+ * mine that descends under Copper Hollow. Each plane owns its own tile array
+ * and its own object index, and every accessor in this module takes the plane
+ * as an optional last argument that defaults to the surface - so code that only
+ * ever cared about the overworld keeps working unchanged.
  */
-const { MAP_HEIGHT, MAP_WIDTH, TILE, BLOCKED_TILES } = __require("shared/constants.js");
+const { MAP_HEIGHT, MAP_WIDTH, PLANE_COUNT, SURFACE, TILE, BLOCKED_TILES } = __require("shared/constants.js");
 const WORLD_SEED = 20240801;
 
 /** Small, fast, fully deterministic PRNG (mulberry32). */
@@ -1098,14 +1115,38 @@ const OBJECT_TYPES = Object.freeze({
   range: { name: 'Cooking range', blocked: true, art: 'range', action: { id: 'cook', label: 'Cook on', verb: 'open' } },
   fountain: { name: 'Fountain', blocked: true, art: 'fountain', action: { id: 'drink', label: 'Drink from', verb: 'cup your hands in' } },
   signpost: { name: 'Signpost', blocked: true, art: 'sign', action: { id: 'read', label: 'Read', verb: 'squint at' } },
-  campfire: { name: 'Fire', blocked: true, art: 'fire', temporary: true, action: { id: 'cook', label: 'Cook on', verb: 'crouch beside' } }
+  campfire: { name: 'Fire', blocked: true, art: 'fire', temporary: true, action: { id: 'cook', label: 'Cook on', verb: 'crouch beside' } },
+
+  // ----------------------------------------------------------------- descent
+  // Every one of these carries a `link` on the *instance*: which plane and tile
+  // it delivers you to. The type only says what it looks like and what the menu
+  // entry reads.
+  mine_entrance: {
+    name: 'Mine entrance', blocked: false, height: 2, art: 'mine_entrance',
+    action: { id: 'climb', label: 'Climb down', verb: 'climb down into' }
+  },
+  ladder_down: {
+    name: 'Ladder', blocked: false, height: 2, art: 'ladder_down',
+    action: { id: 'climb', label: 'Climb down', verb: 'take hold of' }
+  },
+  ladder_up: {
+    name: 'Ladder', blocked: false, height: 2, art: 'ladder_up',
+    action: { id: 'climb', label: 'Climb up', verb: 'take hold of' }
+  },
+  mine_cart: {
+    name: 'Mine cart', blocked: true, art: 'mine_cart',
+    action: { id: 'read', label: 'Search', verb: 'rummage in' }
+  }
 });
 const REGIONS = Object.freeze([
-  { id: 'village', name: 'Emberfall Village', x: 34, y: 40, w: 30, h: 26, music: 'calm' },
-  { id: 'woods', name: 'Whispering Woods', x: 22, y: 2, w: 54, h: 36, music: 'woods' },
-  { id: 'hollow', name: 'Copper Hollow', x: 2, y: 30, w: 30, h: 38, music: 'cave' },
-  { id: 'lake', name: 'Lake Serene', x: 64, y: 26, w: 30, h: 44, music: 'water' },
-  { id: 'meadow', name: 'Sunny Meadow', x: 22, y: 66, w: 52, h: 28, music: 'calm' }
+  { id: 'village', name: 'Emberfall Village', plane: 0, x: 34, y: 40, w: 30, h: 26, music: 'calm' },
+  { id: 'woods', name: 'Whispering Woods', plane: 0, x: 22, y: 2, w: 54, h: 36, music: 'woods' },
+  { id: 'hollow', name: 'Copper Hollow', plane: 0, x: 2, y: 30, w: 30, h: 38, music: 'cave' },
+  { id: 'lake', name: 'Lake Serene', plane: 0, x: 64, y: 26, w: 30, h: 44, music: 'water' },
+  { id: 'meadow', name: 'Sunny Meadow', plane: 0, x: 22, y: 66, w: 52, h: 28, music: 'calm' },
+  { id: 'mine_upper', name: 'Copper Hollow Mine', plane: 1, x: 0, y: 0, w: MAP_WIDTH, h: MAP_HEIGHT, music: 'cave' },
+  { id: 'mine_deep', name: 'The Deep Seam', plane: 2, x: 0, y: 0, w: MAP_WIDTH, h: MAP_HEIGHT, music: 'cave' },
+  { id: 'ember_chamber', name: 'The Ember Chamber', plane: 3, x: 0, y: 0, w: MAP_WIDTH, h: MAP_HEIGHT, music: 'cave' }
 ]);
 
 function idx(x, y) {
@@ -1162,11 +1203,33 @@ function road(tiles, x1, y1, x2, y2, width = 3, tile = TILE.PATH) {
 }
 
 /**
+ * One level of the world: its own tiles, its own objects, its own index.
+ *
+ * `dark` is how much of the plane is unlit, from 0 (broad daylight) to 1 (you
+ * see only what your own light reaches). `ambient` is the colour the renderer
+ * clears to, which is what makes a cave feel like a cave before a single tile
+ * is drawn.
+ */
+function makePlane(index, id, name, fill, { dark = 0, ambient = '#0a0f14' } = {}) {
+  return {
+    index,
+    id,
+    name,
+    tiles: new Uint8Array(MAP_WIDTH * MAP_HEIGHT).fill(fill),
+    objects: [],
+    objectAt: new Map(),
+    dark,
+    ambient
+  };
+}
+
+/**
  * Builds the full world. Pure function of the seed.
  */
 function buildWorld(seed = WORLD_SEED) {
   const rng = makeRng(seed);
-  const tiles = new Uint8Array(MAP_WIDTH * MAP_HEIGHT).fill(TILE.GRASS);
+  const surface = makePlane(SURFACE, 'surface', 'Emberfall', TILE.GRASS);
+  const tiles = surface.tiles;
 
   // --- Terrain bands -------------------------------------------------------
   // Northern woods get a darker grass so the region reads at a glance.
@@ -1227,38 +1290,50 @@ function buildWorld(seed = WORLD_SEED) {
     seed,
     width: MAP_WIDTH,
     height: MAP_HEIGHT,
+    planes: [surface],
+    allObjects: [],
+    // Surface aliases, so anything that only ever meant "the overworld" reads
+    // the way it always did.
     tiles,
+    objects: surface.objects,
+    objectAt: surface.objectAt,
     buildings: { bank, store, smithy, kitchen },
-    objects: [],
-    objectAt: new Map(),
     regions: REGIONS
   };
 
   placeObjects(world, rng);
+  buildMine(world, rng);
   world.checksum = checksumWorld(world);
   return world;
 }
 
-function tileFree(world, x, y) {
+/** The plane a coordinate belongs to, falling back to the surface. */
+function planeAt(world, plane = SURFACE) {
+  return world.planes[plane] || world.planes[SURFACE];
+}
+
+function tileFree(world, x, y, plane = SURFACE) {
   if (x < 1 || y < 1 || x >= MAP_WIDTH - 1 || y >= MAP_HEIGHT - 1) return false;
-  if (world.objectAt.has(`${x},${y}`)) return false;
+  if (planeAt(world, plane).objectAt.has(`${x},${y}`)) return false;
   return true;
 }
 
-function addObject(world, type, x, y) {
-  if (!tileFree(world, x, y)) return null;
+function addObject(world, type, x, y, plane = SURFACE, extra = null) {
+  if (!tileFree(world, x, y, plane)) return null;
   const def = OBJECT_TYPES[type];
   if (!def) return null;
-  const tile = world.tiles[idx(x, y)];
+  const level = planeAt(world, plane);
+  const tile = level.tiles[idx(x, y)];
   const walkableTile = !BLOCKED_TILES.has(tile);
   if (def.water) {
     if (tile !== TILE.WATER) return null;
   } else if (!walkableTile) {
     return null;
   }
-  const obj = { id: `o${world.objects.length}`, type, x, y, depletedUntil: 0 };
-  world.objects.push(obj);
-  world.objectAt.set(`${x},${y}`, obj);
+  const obj = { id: `o${world.allObjects.length}`, type, x, y, plane, depletedUntil: 0, ...(extra || {}) };
+  level.objects.push(obj);
+  level.objectAt.set(`${x},${y}`, obj);
+  world.allObjects.push(obj);
   return obj;
 }
 
@@ -1268,6 +1343,10 @@ function nearRoad(x, y) {
 
 function placeObjects(world, rng) {
   const { tiles } = world;
+
+  // The mine mouth is claimed before the ore scatter, so a randomly placed rock
+  // can never sit on the one tile that has to stay clear.
+  world.mineEntrance = addObject(world, 'mine_entrance', 10, 50);
 
   // Whispering Woods: ordinary trees everywhere, oaks in clusters, willows by
   // the northern lake shore.
@@ -1349,37 +1428,259 @@ function placeObjects(world, rng) {
   addObject(world, 'signpost', 62, 51);
 }
 
+// ------------------------------------------------------------------- the mine
+
+/**
+ * Three levels under Copper Hollow, hand-laid rather than randomly generated.
+ *
+ * A random cave is a maze; a designed one is a place. Every room here has a
+ * reason to exist - an ore face, a junction, a chamber to fight in - and the
+ * corridors between them are short enough that you always know roughly which
+ * way is back to the ladder.
+ *
+ * Rooms are addressed by name so the ladders, ore and (later) creatures can all
+ * refer to the same spot without repeating coordinates.
+ */
+const MINE_LEVELS = [
+  {
+    plane: 1,
+    id: 'mine_upper',
+    floor: TILE.CAVE,
+    wall: TILE.ROCKFACE,
+    rubble: TILE.GRAVEL,
+    dark: 0.55,
+    ambient: '#0b0906',
+    rooms: {
+      landing: { x: 40, y: 44, w: 9, h: 8 },
+      copper: { x: 24, y: 42, w: 12, h: 10 },
+      tin: { x: 26, y: 26, w: 11, h: 9 },
+      gallery: { x: 42, y: 26, w: 10, h: 10 },
+      iron: { x: 12, y: 34, w: 10, h: 10 },
+      coal: { x: 14, y: 54, w: 12, h: 10 },
+      hollow: { x: 30, y: 58, w: 12, h: 9 },
+      descent: { x: 46, y: 58, w: 9, h: 8 }
+    },
+    corridors: [
+      ['landing', 'copper'], ['copper', 'tin'], ['tin', 'gallery'], ['gallery', 'landing'],
+      ['copper', 'iron'], ['iron', 'coal'], ['coal', 'hollow'], ['hollow', 'descent'],
+      ['landing', 'descent']
+    ],
+    ore: [
+      { room: 'copper', types: ['copper_rock', 'copper_rock', 'tin_rock'], count: 10 },
+      { room: 'tin', types: ['tin_rock', 'tin_rock', 'copper_rock'], count: 9 },
+      { room: 'gallery', types: ['iron_rock', 'copper_rock'], count: 7 },
+      { room: 'iron', types: ['iron_rock', 'iron_rock', 'coal_rock'], count: 10 },
+      { room: 'coal', types: ['coal_rock', 'coal_rock', 'iron_rock'], count: 11 },
+      { room: 'hollow', types: ['coal_rock', 'iron_rock'], count: 6 }
+    ]
+  },
+  {
+    plane: 2,
+    id: 'mine_deep',
+    floor: TILE.MINE_FLOOR,
+    wall: TILE.MINE_WALL,
+    rubble: TILE.GRAVEL,
+    dark: 0.78,
+    ambient: '#05070b',
+    rooms: {
+      landing: { x: 46, y: 58, w: 9, h: 8 },
+      crossing: { x: 30, y: 56, w: 12, h: 10 },
+      seam: { x: 14, y: 52, w: 12, h: 11 },
+      fungus: { x: 16, y: 30, w: 13, h: 12 },
+      hall: { x: 34, y: 34, w: 14, h: 12 },
+      coalface: { x: 50, y: 24, w: 12, h: 12 },
+      vault: { x: 52, y: 42, w: 10, h: 10 },
+      descent: { x: 34, y: 18, w: 9, h: 8 }
+    },
+    corridors: [
+      ['landing', 'crossing'], ['crossing', 'seam'], ['seam', 'fungus'], ['fungus', 'hall'],
+      ['hall', 'crossing'], ['hall', 'coalface'], ['coalface', 'vault'], ['vault', 'landing'],
+      ['coalface', 'descent'], ['fungus', 'descent']
+    ],
+    ore: [
+      { room: 'seam', types: ['coal_rock', 'iron_rock'], count: 12 },
+      { room: 'coalface', types: ['coal_rock', 'coal_rock', 'iron_rock'], count: 13 },
+      { room: 'hall', types: ['iron_rock', 'coal_rock'], count: 8 },
+      { room: 'vault', types: ['coal_rock'], count: 6 }
+    ]
+  },
+  {
+    plane: 3,
+    id: 'ember_chamber',
+    floor: TILE.EMBER,
+    wall: TILE.CRYSTAL,
+    rubble: TILE.MINE_FLOOR,
+    dark: 0.45,
+    ambient: '#120604',
+    rooms: {
+      landing: { x: 34, y: 18, w: 9, h: 8 },
+      approach: { x: 35, y: 30, w: 8, h: 10 },
+      hall: { x: 26, y: 46, w: 26, h: 22 }
+    },
+    corridors: [['landing', 'approach'], ['approach', 'hall']],
+    ore: []
+  }
+];
+
+function roomCentre(room) {
+  return { x: room.x + Math.floor(room.w / 2), y: room.y + Math.floor(room.h / 2) };
+}
+
+/** L-shaped tunnel between two points: along x, then along y. */
+function corridor(tiles, ax, ay, bx, by, tile, width = 2) {
+  const half = Math.floor(width / 2);
+  const x0 = Math.min(ax, bx);
+  const x1 = Math.max(ax, bx);
+  const y0 = Math.min(ay, by);
+  const y1 = Math.max(ay, by);
+  fillRect(tiles, x0, ay - half, x1 - x0 + 1, width, tile);
+  fillRect(tiles, bx - half, y0, width, y1 - y0 + 1, tile);
+}
+
+/**
+ * Anything carved gets a wall around it. The rest of the plane stays VOID,
+ * which the renderer draws as nothing at all - so a mine level reads as a
+ * lit island of rock in the dark rather than a rectangle with a border.
+ */
+function encloseCarved(level, wall) {
+  const { tiles } = level;
+  // Decided from a snapshot and applied afterwards: writing walls as we scan
+  // would let each new wall seed the next, and the whole plane fills in.
+  const ring = [];
+  for (let y = 1; y < MAP_HEIGHT - 1; y += 1) {
+    for (let x = 1; x < MAP_WIDTH - 1; x += 1) {
+      if (tiles[idx(x, y)] !== TILE.VOID) continue;
+      let touchesFloor = false;
+      for (let dy = -1; dy <= 1 && !touchesFloor; dy += 1) {
+        for (let dx = -1; dx <= 1; dx += 1) {
+          if (tiles[idx(x + dx, y + dy)] !== TILE.VOID) {
+            touchesFloor = true;
+            break;
+          }
+        }
+      }
+      if (touchesFloor) ring.push(idx(x, y));
+    }
+  }
+  for (const i of ring) tiles[i] = wall;
+}
+
+function buildMine(world, rng) {
+  const built = [];
+
+  for (const spec of MINE_LEVELS) {
+    const level = makePlane(spec.plane, spec.id, regionName(spec.id), TILE.VOID, {
+      dark: spec.dark,
+      ambient: spec.ambient
+    });
+    world.planes[spec.plane] = level;
+
+    for (const room of Object.values(spec.rooms)) {
+      fillRect(level.tiles, room.x, room.y, room.w, room.h, spec.floor);
+    }
+    for (const [from, to] of spec.corridors) {
+      const a = roomCentre(spec.rooms[from]);
+      const b = roomCentre(spec.rooms[to]);
+      corridor(level.tiles, a.x, a.y, b.x, b.y, spec.floor, spec.plane === 3 ? 3 : 2);
+    }
+    // A scatter of loose stone, so the floor is not one flat colour.
+    for (let i = 0; i < 260; i += 1) {
+      const x = 1 + Math.floor(rng() * (MAP_WIDTH - 2));
+      const y = 1 + Math.floor(rng() * (MAP_HEIGHT - 2));
+      if (level.tiles[idx(x, y)] === spec.floor && rng() < 0.5) level.tiles[idx(x, y)] = spec.rubble;
+    }
+    encloseCarved(level, spec.wall);
+    built.push({ spec, level });
+  }
+
+  // Ore faces, placed room by room so each gallery has its own character.
+  for (const { spec } of built) {
+    for (const patch of spec.ore) {
+      const room = spec.rooms[patch.room];
+      let placed = 0;
+      for (let i = 0; i < patch.count * 6 && placed < patch.count; i += 1) {
+        const x = room.x + Math.floor(rng() * room.w);
+        const y = room.y + Math.floor(rng() * room.h);
+        const type = patch.types[Math.floor(rng() * patch.types.length)];
+        if (addObject(world, type, x, y, spec.plane)) placed += 1;
+      }
+    }
+  }
+
+  // --- Stitching the levels together --------------------------------------
+  // Each pair of ladders points at the other's tile, so climbing either way
+  // leaves you standing at the foot of the one you would use to go back.
+  const surfaceEntrance = world.mineEntrance;
+  const landings = built.map(({ spec }) => ({ spec, at: roomCentre(spec.rooms.landing) }));
+  const descents = built
+    .filter(({ spec }) => spec.rooms.descent)
+    .map(({ spec }) => ({ spec, at: roomCentre(spec.rooms.descent) }));
+
+  // Surface -> level 1.
+  const firstLanding = landings[0];
+  const upFromOne = addObject(world, 'ladder_up', firstLanding.at.x, firstLanding.at.y, 1, {
+    link: { plane: SURFACE, x: surfaceEntrance.x, y: surfaceEntrance.y }
+  });
+  surfaceEntrance.link = { plane: 1, x: upFromOne.x, y: upFromOne.y };
+
+  // Level n -> level n+1.
+  for (const descent of descents) {
+    const below = landings.find((entry) => entry.spec.plane === descent.spec.plane + 1);
+    if (!below) continue;
+    const up = addObject(world, 'ladder_up', below.at.x, below.at.y, below.spec.plane, {
+      link: { plane: descent.spec.plane, x: descent.at.x, y: descent.at.y }
+    });
+    addObject(world, 'ladder_down', descent.at.x, descent.at.y, descent.spec.plane, {
+      link: { plane: below.spec.plane, x: up.x, y: up.y }
+    });
+  }
+
+  // A little dressing so the galleries look worked rather than found.
+  for (const { spec } of built) {
+    for (const room of Object.values(spec.rooms)) {
+      if (rng() < 0.45) addObject(world, 'mine_cart', room.x + 1, room.y + 1, spec.plane);
+    }
+  }
+}
+
+function regionName(id) {
+  const region = REGIONS.find((entry) => entry.id === id);
+  return region ? region.name : 'The Deep';
+}
+
 /**
  * Order-independent-ish checksum used to prove client and server generated the
  * same map. Cheap, and good enough to catch a stale cached build.
  */
 function checksumWorld(world) {
   let h = 2166136261 >>> 0;
-  for (let i = 0; i < world.tiles.length; i += 1) {
-    h ^= world.tiles[i];
-    h = Math.imul(h, 16777619) >>> 0;
+  for (const level of world.planes) {
+    for (let i = 0; i < level.tiles.length; i += 1) {
+      h ^= level.tiles[i];
+      h = Math.imul(h, 16777619) >>> 0;
+    }
   }
-  for (const obj of world.objects) {
-    for (const ch of `${obj.type}:${obj.x}:${obj.y};`) {
+  for (const obj of world.allObjects) {
+    for (const ch of `${obj.type}:${obj.plane}:${obj.x}:${obj.y};`) {
       h ^= ch.charCodeAt(0);
       h = Math.imul(h, 16777619) >>> 0;
     }
   }
   return h >>> 0;
 }
-function tileAt(world, x, y) {
+function tileAt(world, x, y, plane = SURFACE) {
   if (x < 0 || y < 0 || x >= world.width || y >= world.height) return TILE.WALL;
-  return world.tiles[y * world.width + x];
+  return planeAt(world, plane).tiles[y * world.width + x];
 }
-function objectAt(world, x, y) {
-  return world.objectAt.get(`${x},${y}`) || null;
+function objectAt(world, x, y, plane = SURFACE) {
+  return planeAt(world, plane).objectAt.get(`${x},${y}`) || null;
 }
 
 /** True when a character may stand on this tile right now. */
-function isWalkable(world, x, y) {
-  const tile = tileAt(world, x, y);
+function isWalkable(world, x, y, plane = SURFACE) {
+  const tile = tileAt(world, x, y, plane);
   if (BLOCKED_TILES.has(tile)) return false;
-  const obj = objectAt(world, x, y);
+  const obj = objectAt(world, x, y, plane);
   if (obj) {
     // Stumps and spent rock faces still occupy their tile, so blocking does not
     // depend on whether the resource is currently depleted.
@@ -1388,11 +1689,18 @@ function isWalkable(world, x, y) {
   }
   return true;
 }
-function regionAt(world, x, y) {
+function regionAt(world, x, y, plane = SURFACE) {
   for (const region of world.regions) {
+    if ((region.plane ?? SURFACE) !== plane) continue;
     if (x >= region.x && x < region.x + region.w && y >= region.y && y < region.y + region.h) return region;
   }
+  if (plane !== SURFACE) return { id: 'deep', name: planeAt(world, plane).name, music: 'cave' };
   return { id: 'wilds', name: 'The Outskirts', music: 'calm' };
+}
+
+/** How dark a plane is, 0 (daylight) to 1 (only your own light reaches). */
+function planeDarkness(world, plane = SURFACE) {
+  return planeAt(world, plane).dark || 0;
 }
 
   __exports.WORLD_SEED = WORLD_SEED;
@@ -1400,11 +1708,13 @@ function regionAt(world, x, y) {
   __exports.OBJECT_TYPES = OBJECT_TYPES;
   __exports.REGIONS = REGIONS;
   __exports.buildWorld = buildWorld;
+  __exports.planeAt = planeAt;
   __exports.checksumWorld = checksumWorld;
   __exports.tileAt = tileAt;
   __exports.objectAt = objectAt;
   __exports.isWalkable = isWalkable;
   __exports.regionAt = regionAt;
+  __exports.planeDarkness = planeDarkness;
 };
 
 __modules["shared/constants.js"] = function (__exports, __require) {
@@ -1462,11 +1772,33 @@ const TILE = {
   ROCKFACE: 9,
   FLOWERS: 10,
   DARKGRASS: 11,
-  GRAVEL: 12
+  GRAVEL: 12,
+  // Underground. The mine reads as three distinct places, so each level gets
+  // its own floor and wall rather than re-tinting the same pair.
+  MINE_FLOOR: 13,
+  MINE_WALL: 14,
+  EMBER: 15,
+  CRYSTAL: 16,
+  VOID: 17
 };
 
 /** Tiles a character can never stand on. */
-const BLOCKED_TILES = new Set([TILE.WATER, TILE.WALL, TILE.ROCKFACE]);
+const BLOCKED_TILES = new Set([
+  TILE.WATER,
+  TILE.WALL,
+  TILE.ROCKFACE,
+  TILE.MINE_WALL,
+  TILE.CRYSTAL,
+  TILE.VOID
+]);
+
+/**
+ * The world has a vertical dimension. Plane 0 is the surface; 1-3 descend into
+ * the mine below Copper Hollow. Every entity carries a `plane`, and nothing on
+ * one plane can see, path to or hit anything on another.
+ */
+const PLANE_COUNT = 4;
+const SURFACE = 0;
 const SKILLS = [
   'attack',
   'strength',
@@ -1526,6 +1858,8 @@ const CHAT_CHANNELS = ['game', 'public', 'private', 'system'];
   __exports.LOOT_DESPAWN_TICKS = LOOT_DESPAWN_TICKS;
   __exports.TILE = TILE;
   __exports.BLOCKED_TILES = BLOCKED_TILES;
+  __exports.PLANE_COUNT = PLANE_COUNT;
+  __exports.SURFACE = SURFACE;
   __exports.SKILLS = SKILLS;
   __exports.COMBAT_SKILLS = COMBAT_SKILLS;
   __exports.EQUIP_SLOTS = EQUIP_SLOTS;
@@ -1598,7 +1932,8 @@ const state = {
   playerName: '',
   appearance: null,
 
-  self: { x: 48, y: 52, hp: 10, maxHp: 10, energy: 100, run: true, style: 'accurate', region: '', dead: false },
+  self: { x: 48, y: 52, plane: 0, hp: 10, maxHp: 10, energy: 100, run: true, style: 'accurate', region: '', dead: false },
+  plane: { plane: 0, id: 'surface', name: 'Emberfall', dark: 0, ambient: '#0a0f14' },
   players: new Map(),
   npcs: new Map(),
   groundItems: new Map(),
@@ -1643,7 +1978,28 @@ function applyMessage(msg) {
       state.playerId = msg.id;
       state.playerName = msg.name;
       state.appearance = msg.appearance;
+      if (msg.plane) {
+        state.plane = msg.plane;
+        state.self.plane = msg.plane.plane;
+      }
       bus.emit('login', msg);
+      break;
+
+    // Sent the instant a ladder is used, ahead of the state message, so the
+    // renderer can swap planes and snap the camera in the same frame rather
+    // than easing across half the map.
+    case 'plane':
+      state.plane = msg;
+      state.self.plane = msg.plane;
+      state.self.x = msg.x;
+      state.self.y = msg.y;
+      state.players.clear();
+      state.npcs.clear();
+      state.groundItems.clear();
+      state.dynamicObjects.clear();
+      state.objectStates.clear();
+      state.splats.length = 0;
+      bus.emit('plane', msg);
       break;
 
     case 'state': {
@@ -2132,6 +2488,8 @@ __modules["shared/engine/game.js"] = function (__exports, __require) {
  */
 const { BANK_SIZE,
   COMBAT_TIMEOUT_TICKS,
+  PLANE_COUNT,
+  SURFACE,
   HP_REGEN_TICKS,
   INVENTORY_SIZE,
   LOOT_DESPAWN_TICKS,
@@ -2150,7 +2508,7 @@ const { SHOPS, shopDef, shopAccepts } = __require("shared/shops.js");
 const { COOKING, SMELTING, SMITHING, burnChance, smeltingRecipe, smithingRecipe } = __require("shared/crafting.js");
 const { NPC_SPAWNS, npcDef } = __require("shared/npcs.js");
 const { QUESTS, QUEST_IDS, questDef } = __require("shared/quests.js");
-const { OBJECT_TYPES, buildWorld, isWalkable, objectAt, regionAt, tileAt } = __require("shared/world.js");
+const { OBJECT_TYPES, buildWorld, isWalkable, objectAt, planeAt, regionAt, tileAt } = __require("shared/world.js");
 const { createSkillSet, combatLevel, levelForXp, totalLevel } = __require("shared/skills.js");
 const { sanitizeAppearance } = __require("shared/appearance.js");
 const { chebyshev, findPath, isAdjacent } = __require("shared/engine/pathfinding.js");
@@ -2227,10 +2585,11 @@ class Game {
     this.outbox.push({ to: playerId, msg: { t: type, ...data } });
   }
 
-  /** Everyone who can see (x, y) gets the message. */
-  broadcastNear(x, y, type, data = {}, exclude = null) {
+  /** Everyone who can see (x, y) on that plane gets the message. */
+  broadcastNear(x, y, plane, type, data = {}, exclude = null) {
     for (const player of this.players.values()) {
       if (player.id === exclude) continue;
+      if (player.plane !== plane) continue;
       if (chebyshev(player.x, player.y, x, y) > VIEW_RADIUS + 2) continue;
       this.send(player.id, type, data);
     }
@@ -2257,8 +2616,9 @@ class Game {
       const def = npcDef(spawn.type);
       if (!def) continue;
       let { x, y } = spawn;
-      if (!isWalkable(this.world, x, y)) {
-        const nearby = this.findFreeTileNear(x, y, 6);
+      const plane = spawn.plane ?? SURFACE;
+      if (!isWalkable(this.world, x, y, plane)) {
+        const nearby = this.findFreeTileNear(x, y, 6, plane);
         if (!nearby) continue;
         x = nearby.x;
         y = nearby.y;
@@ -2272,6 +2632,7 @@ class Game {
         name: def.name,
         x,
         y,
+        plane,
         spawnX: x,
         spawnY: y,
         area: spawn.area,
@@ -2297,14 +2658,14 @@ class Game {
     }
   }
 
-  findFreeTileNear(x, y, radius = 4) {
+  findFreeTileNear(x, y, radius = 4, plane = SURFACE) {
     for (let r = 0; r <= radius; r += 1) {
       for (let dy = -r; dy <= r; dy += 1) {
         for (let dx = -r; dx <= r; dx += 1) {
           if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
           const nx = x + dx;
           const ny = y + dy;
-          if (isWalkable(this.world, nx, ny)) return { x: nx, y: ny };
+          if (isWalkable(this.world, nx, ny, plane)) return { x: nx, y: ny };
         }
       }
     }
@@ -2323,6 +2684,7 @@ class Game {
       appearance: sanitizeAppearance(save ? save.appearance : profile.appearance),
       x: save ? save.x ?? SPAWN_POINT.x : SPAWN_POINT.x,
       y: save ? save.y ?? SPAWN_POINT.y : SPAWN_POINT.y,
+      plane: save ? clampPlane(save.plane) : SURFACE,
       dir: 'south',
       path: [],
       skills: createSkillSet(),
@@ -2354,15 +2716,24 @@ class Game {
     if (save) this.applySave(player, save);
     else for (const entry of STARTER_KIT) addItem(player.inventory, entry.id, entry.count);
 
-    if (!isWalkable(this.world, player.x, player.y)) {
-      const free = this.findFreeTileNear(SPAWN_POINT.x, SPAWN_POINT.y, 8) || SPAWN_POINT;
-      player.x = free.x;
-      player.y = free.y;
+    if (!isWalkable(this.world, player.x, player.y, player.plane)) {
+      const free = this.findFreeTileNear(player.x, player.y, 8, player.plane);
+      if (free) {
+        player.x = free.x;
+        player.y = free.y;
+      } else {
+        // Nowhere sensible on that plane any more (a changed map, an edited
+        // save): put them back by the fountain rather than inside a wall.
+        player.plane = SURFACE;
+        const surface = this.findFreeTileNear(SPAWN_POINT.x, SPAWN_POINT.y, 8, SURFACE) || SPAWN_POINT;
+        player.x = surface.x;
+        player.y = surface.y;
+      }
     }
 
     this.players.set(id, player);
     this.sendFullState(player);
-    this.broadcastNear(player.x, player.y, 'msg', { text: `${player.name} has joined Emberfall.`, channel: 'system' }, id);
+    this.broadcastNear(player.x, player.y, player.plane, 'msg', { text: `${player.name} has joined Emberfall.`, channel: 'system' }, id);
     return player;
   }
 
@@ -2371,7 +2742,7 @@ class Game {
     if (!player) return null;
     if (player.trade) this.cancelTrade(player, 'Your trading partner left.');
     this.players.delete(id);
-    this.broadcastNear(player.x, player.y, 'msg', { text: `${player.name} has left Emberfall.`, channel: 'system' }, id);
+    this.broadcastNear(player.x, player.y, player.plane, 'msg', { text: `${player.name} has left Emberfall.`, channel: 'system' }, id);
     return this.serializePlayer(player);
   }
 
@@ -2381,6 +2752,7 @@ class Game {
       appearance: player.appearance,
       x: player.x,
       y: player.y,
+      plane: player.plane,
       hp: player.hp,
       energy: Math.round(player.energy),
       attackStyle: player.attackStyle,
@@ -2467,7 +2839,7 @@ class Game {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     if (x < 0 || y < 0 || x >= this.world.width || y >= this.world.height) return;
     this.clearActivity(player);
-    player.path = findPath(this.world, player.x, player.y, x, y);
+    player.path = findPath(this.world, player.x, player.y, x, y, { plane: player.plane });
     if (player.path.length === 0 && !(player.x === x && player.y === y)) {
       this.message(player.id, 'You cannot reach that.');
     }
@@ -2479,24 +2851,28 @@ class Game {
     const action = msg.action ? String(msg.action) : null;
     this.clearActivity(player);
 
+    // A stale click from before a ladder, or a client trying its luck: nothing
+    // on another level is ever a legal target.
+    const sameLevel = (thing) => thing && (thing.plane ?? SURFACE) === player.plane;
+
     if (kind === 'npc') {
       const npc = this.npcs.get(id);
-      if (!npc || npc.dead) return;
+      if (!npc || npc.dead || !sameLevel(npc)) return;
       player.pending = { kind: 'npc', id, action: action || (npc.def.friendly ? 'talk' : 'attack'), range: 1 };
       this.pathToward(player, npc.x, npc.y, 1);
     } else if (kind === 'object') {
       const obj = this.objectById(id);
-      if (!obj) return;
+      if (!sameLevel(obj)) return;
       player.pending = { kind: 'object', id, action, range: 1 };
       this.pathToward(player, obj.x, obj.y, 1);
     } else if (kind === 'player') {
       const other = this.players.get(id);
-      if (!other || other.id === player.id) return;
+      if (!other || other.id === player.id || !sameLevel(other)) return;
       player.pending = { kind: 'player', id, action: action || 'follow', range: 1 };
       this.pathToward(player, other.x, other.y, 1);
     } else if (kind === 'ground_item') {
       const item = this.groundItems.get(id);
-      if (!item) return;
+      if (!sameLevel(item)) return;
       player.pending = { kind: 'ground_item', id, action: 'take', range: 0 };
       this.pathToward(player, item.x, item.y, 0);
     }
@@ -2507,7 +2883,7 @@ class Game {
       player.path = [];
       return;
     }
-    player.path = findPath(this.world, player.x, player.y, x, y, { range });
+    player.path = findPath(this.world, player.x, player.y, x, y, { range, plane: player.plane });
     if (player.path.length === 0) this.message(player.id, 'You cannot reach that.');
   }
 
@@ -2516,7 +2892,7 @@ class Game {
     if (!raw) return;
     const text = filterChat(raw);
     player.chat = { text, ticks: CHAT_TICKS };
-    this.broadcastNear(player.x, player.y, 'chat', { id: player.id, name: player.name, text });
+    this.broadcastNear(player.x, player.y, player.plane, 'chat', { id: player.id, name: player.name, text });
   }
 
   cmdEmote(player, msg) {
@@ -2654,12 +3030,12 @@ class Game {
       this.message(player.id, `You need firemaking level ${recipe.level} to light those.`);
       return;
     }
-    if (objectAt(this.world, player.x, player.y) || tileAt(this.world, player.x, player.y) === TILE.WATER) {
+    if (objectAt(this.world, player.x, player.y, player.plane) || tileAt(this.world, player.x, player.y, player.plane) === TILE.WATER) {
       this.message(player.id, 'You cannot light a fire here.');
       return;
     }
     removeSlot(player.inventory, slot, 1);
-    this.addDynamicObject('campfire', player.x, player.y, CAMPFIRE_TICKS);
+    this.addDynamicObject('campfire', player.x, player.y, player.plane, CAMPFIRE_TICKS);
     this.awardXp(player, 'firemaking', recipe.xp);
     player.anim = { kind: 'light', until: this.tickCount + 3 };
     this.message(player.id, 'The fire catches and the logs begin to burn.');
@@ -2667,7 +3043,7 @@ class Game {
     this.sendInventory(player);
     this.checkQuests(player);
     // Step aside so the player is not standing in their own campfire.
-    const free = this.findFreeTileNear(player.x, player.y, 2);
+    const free = this.findFreeTileNear(player.x, player.y, 2, player.plane);
     if (free) {
       player.x = free.x;
       player.y = free.y;
@@ -2685,14 +3061,14 @@ class Game {
     const amount = count === 'all' ? entry.count : Math.max(1, Math.min(entry.count, Math.floor(Number(count) || 1)));
     const removed = removeSlot(player.inventory, slot, amount);
     if (!removed) return;
-    this.spawnGroundItem(removed.id, removed.count, player.x, player.y, player.id);
+    this.spawnGroundItem(removed.id, removed.count, player.x, player.y, player.plane, player.id);
     this.message(player.id, `You drop the ${itemName(removed.id).toLowerCase()}.`);
     this.sendInventory(player);
   }
 
-  spawnGroundItem(itemId, count, x, y, ownerId = null) {
+  spawnGroundItem(itemId, count, x, y, plane = SURFACE, ownerId = null) {
     const id = this.uid('g');
-    const item = { id, itemId, count, x, y, owner: ownerId, droppedAt: this.tickCount };
+    const item = { id, itemId, count, x, y, plane, owner: ownerId, droppedAt: this.tickCount };
     this.groundItems.set(id, item);
     return item;
   }
@@ -2720,20 +3096,21 @@ class Game {
 
   objectById(id) {
     if (this.dynamicObjects.has(id)) return this.dynamicObjects.get(id);
-    return this.world.objects.find((obj) => obj.id === id) || null;
+    return this.world.allObjects.find((obj) => obj.id === id) || null;
   }
 
-  addDynamicObject(type, x, y, lifetime) {
+  addDynamicObject(type, x, y, plane, lifetime) {
     const id = this.uid('d');
-    const obj = { id, type, x, y, expires: this.tickCount + lifetime, dynamic: true, depletedUntil: 0 };
+    const obj = { id, type, x, y, plane, expires: this.tickCount + lifetime, dynamic: true, depletedUntil: 0 };
     this.dynamicObjects.set(id, obj);
-    this.world.objectAt.set(`${x},${y}`, obj);
+    planeAt(this.world, plane).objectAt.set(`${x},${y}`, obj);
     return obj;
   }
 
   removeDynamicObject(obj) {
     this.dynamicObjects.delete(obj.id);
-    if (this.world.objectAt.get(`${obj.x},${obj.y}`) === obj) this.world.objectAt.delete(`${obj.x},${obj.y}`);
+    const index = planeAt(this.world, obj.plane).objectAt;
+    if (index.get(`${obj.x},${obj.y}`) === obj) index.delete(`${obj.x},${obj.y}`);
   }
 
   /** Runs the moment a player reaches whatever they clicked on. */
@@ -2808,6 +3185,9 @@ class Game {
         player.hp = Math.min(this.maxHp(player), player.hp + 2);
         this.message(player.id, 'You drink the cool spring water. Refreshing.');
         break;
+      case 'climb':
+        this.climb(player, obj);
+        break;
       case 'read':
         this.message(player.id, this.signText(obj));
         break;
@@ -2816,7 +3196,69 @@ class Game {
     }
   }
 
+  /**
+   * Moves a player between planes. A ladder is a single, instant step - there
+   * is no partial state to get stuck in - but everything that was watching the
+   * player has to be told, because from every other player's point of view they
+   * simply vanished.
+   */
+  climb(player, obj) {
+    const link = obj.link;
+    if (!link) {
+      this.message(player.id, 'It does not lead anywhere.');
+      return;
+    }
+    const destination = planeAt(this.world, link.plane);
+    const spot = isWalkable(this.world, link.x, link.y, link.plane)
+      ? { x: link.x, y: link.y }
+      : this.findFreeTileNear(link.x, link.y, 4, link.plane);
+    if (!spot) {
+      this.message(player.id, 'Something is blocking the way.');
+      return;
+    }
+
+    const fromX = player.x;
+    const fromY = player.y;
+    const fromPlane = player.plane;
+    const going = link.plane > fromPlane ? 'down' : 'up';
+
+    this.clearActivity(player);
+    if (player.trade) this.cancelTrade(player, 'You cannot trade from different levels.');
+    player.path = [];
+    player.x = spot.x;
+    player.y = spot.y;
+    player.plane = link.plane;
+    // Nobody on the new level has seen this player's kit yet, and nobody on the
+    // old one should keep a stale copy of it.
+    player.seen.clear();
+    for (const other of this.players.values()) other.seen.delete(player.id);
+    for (const npc of this.npcs.values()) if (npc.targetId === player.id) npc.targetId = null;
+
+    this.broadcastNear(fromX, fromY, fromPlane, 'msg', { text: `${player.name} climbs ${going}.`, channel: 'system' }, player.id);
+    this.message(player.id, `You climb ${going} into ${destination.name}.`, 'system');
+    this.send(player.id, 'plane', this.planeInfo(player));
+    this.sendState(player);
+    recordEvent(player, 'action', `climb_${destination.id}`);
+    this.checkQuests(player);
+  }
+
+  planeInfo(player) {
+    const level = planeAt(this.world, player.plane);
+    return {
+      plane: player.plane,
+      id: level.id,
+      name: level.name,
+      dark: level.dark,
+      ambient: level.ambient,
+      x: player.x,
+      y: player.y
+    };
+  }
+
   signText(obj) {
+    if (obj.type === 'mine_cart') return 'The cart holds nothing but grit and one very old glove.';
+    if (obj.plane === 1) return 'Chalked on the rock: "Copper and tin above, iron and coal below. Bring a light."';
+    if (obj.plane >= 2) return 'Scratched into the wall: "Deeper still. Bring a friend as well as a light."';
     if (obj.x < 40) return 'Signpost: "Copper Hollow - mind the golems. Ore this way."';
     if (obj.x > 58) return 'Signpost: "Lake Serene - fishing, swimming, and quiet."';
     return 'Signpost: "Emberfall Village. Bank north-west, store north-east, smithy south-west, kitchen south-east."';
@@ -3028,7 +3470,7 @@ class Game {
 
   tickPlayerCombat(player) {
     const npc = this.npcs.get(player.combat.targetId);
-    if (!npc || npc.dead) {
+    if (!npc || npc.dead || npc.plane !== player.plane) {
       player.combat.targetId = null;
       return;
     }
@@ -3059,17 +3501,18 @@ class Game {
 
   tickNpcCombat(npc) {
     const target = this.players.get(npc.targetId);
-    if (!target || target.dead) {
+    if (!target || target.dead || target.plane !== npc.plane) {
+      // Climbing a ladder ends a fight: nothing follows you between levels.
       npc.targetId = null;
       return;
     }
     if (chebyshev(npc.x, npc.y, npc.spawnX, npc.spawnY) > 12) {
       npc.targetId = null;
-      npc.path = findPath(this.world, npc.x, npc.y, npc.spawnX, npc.spawnY);
+      npc.path = findPath(this.world, npc.x, npc.y, npc.spawnX, npc.spawnY, { plane: npc.plane });
       return;
     }
     if (!isAdjacent(npc.x, npc.y, target.x, target.y)) {
-      if (npc.path.length === 0) npc.path = findPath(this.world, npc.x, npc.y, target.x, target.y, { range: 1 });
+      if (npc.path.length === 0) npc.path = findPath(this.world, npc.x, npc.y, target.x, target.y, { range: 1, plane: npc.plane });
       return;
     }
     npc.path = [];
@@ -3092,6 +3535,7 @@ class Game {
   pushSplat(entity, damage, kind) {
     const splat = { id: entity.id, damage, kind };
     for (const player of this.players.values()) {
+      if (player.plane !== (entity.plane ?? SURFACE)) continue;
       if (chebyshev(player.x, player.y, entity.x, entity.y) <= VIEW_RADIUS) player.splats.push(splat);
     }
   }
@@ -3110,7 +3554,7 @@ class Game {
       const min = drop.min ?? 1;
       const max = drop.max ?? min;
       const count = min + Math.floor(this.rng() * (max - min + 1));
-      if (count > 0) this.spawnGroundItem(drop.id, count, npc.x, npc.y, player.id);
+      if (count > 0) this.spawnGroundItem(drop.id, count, npc.x, npc.y, npc.plane, player.id);
     }
 
     recordEvent(player, 'kill', npc.type);
@@ -3127,6 +3571,7 @@ class Game {
     player.respawnAt = this.tickCount + RESPAWN_TICKS;
     for (const npc of this.npcs.values()) if (npc.targetId === player.id) npc.targetId = null;
     this.message(player.id, 'You have been knocked out! You will wake up in Emberfall shortly.', 'system');
+    player.wokeUnderground = player.plane !== SURFACE;
     this.send(player.id, 'effect', { kind: 'knockout' });
   }
 
@@ -3134,10 +3579,21 @@ class Game {
     player.dead = false;
     player.x = SPAWN_POINT.x;
     player.y = SPAWN_POINT.y;
+    // However deep you were, you always wake up on the surface. Losing the walk
+    // back down is the whole cost of being knocked out.
+    player.plane = SURFACE;
+    player.seen.clear();
     player.hp = this.maxHp(player);
     player.energy = RUN_ENERGY_MAX;
     player.combat.timer = 0;
-    this.message(player.id, 'You wake up by the fountain, dusted off and none the worse.', 'system');
+    this.message(
+      player.id,
+      player.wokeUnderground
+        ? 'Someone carried you up the ladder. You wake up by the fountain, no worse for it.'
+        : 'You wake up by the fountain, dusted off and none the worse.',
+      'system'
+    );
+    player.wokeUnderground = false;
     this.send(player.id, 'effect', { kind: 'respawn' });
   }
 
@@ -3246,7 +3702,7 @@ class Game {
       case 'giveItem': {
         const count = effect.count || 1;
         if (spaceFor(player.inventory, effect.id, count) < count) {
-          this.spawnGroundItem(effect.id, count, player.x, player.y, player.id);
+          this.spawnGroundItem(effect.id, count, player.x, player.y, player.plane, player.id);
           this.message(player.id, `You have no room, so the ${itemName(effect.id).toLowerCase()} drops at your feet.`);
         } else {
           addItem(player.inventory, effect.id, count);
@@ -3288,7 +3744,7 @@ class Game {
     if (rewards.coins) addItem(player.inventory, 'coins', rewards.coins);
     for (const item of rewards.items || []) {
       if (spaceFor(player.inventory, item.id, item.count) < item.count) {
-        this.spawnGroundItem(item.id, item.count, player.x, player.y, player.id);
+        this.spawnGroundItem(item.id, item.count, player.x, player.y, player.plane, player.id);
       } else {
         addItem(player.inventory, item.id, item.count);
       }
@@ -3470,6 +3926,7 @@ class Game {
       this.message(player.id, 'Somebody is already trading.');
       return;
     }
+    if (other.plane !== player.plane) return;
     other.tradeRequestFrom = player.id;
     this.message(player.id, `You send a trade request to ${other.name}.`);
     this.message(other.id, `${player.name} wishes to trade with you. Click them to accept.`, 'system');
@@ -3646,7 +4103,7 @@ class Game {
     let moved = false;
     for (let i = 0; i < steps && player.path.length > 0; i += 1) {
       const next = player.path.shift();
-      if (!isWalkable(this.world, next.x, next.y)) {
+      if (!isWalkable(this.world, next.x, next.y, player.plane)) {
         player.path = [];
         break;
       }
@@ -3709,7 +4166,7 @@ class Game {
 
     if (!npc.targetId && npc.def.aggressive) {
       for (const player of this.players.values()) {
-        if (player.dead) continue;
+        if (player.dead || player.plane !== npc.plane) continue;
         // Creatures ignore anyone who simply wandered past out of reach, and
         // never pick on a character less than a third of their level.
         if (combatLevel(player.skills) * 3 < (npc.def.level || 1)) continue;
@@ -3730,13 +4187,13 @@ class Game {
         const area = npc.area;
         const tx = area.x + Math.floor(this.rng() * area.w);
         const ty = area.y + Math.floor(this.rng() * area.h);
-        if (isWalkable(this.world, tx, ty)) npc.path = findPath(this.world, npc.x, npc.y, tx, ty);
+        if (isWalkable(this.world, tx, ty, npc.plane)) npc.path = findPath(this.world, npc.x, npc.y, tx, ty, { plane: npc.plane });
       }
     }
 
     if (npc.path && npc.path.length > 0) {
       const next = npc.path.shift();
-      if (isWalkable(this.world, next.x, next.y)) {
+      if (isWalkable(this.world, next.x, next.y, npc.plane)) {
         npc.dir = directionBetween(npc.x, npc.y, next.x, next.y) || npc.dir;
         npc.x = next.x;
         npc.y = next.y;
@@ -3768,6 +4225,7 @@ class Game {
       worldSeed: this.world.seed,
       checksum: this.world.checksum,
       spawn: { x: player.x, y: player.y },
+      plane: this.planeInfo(player),
       isNew: player.isNew
     });
     this.sendInventory(player);
@@ -3823,6 +4281,7 @@ class Game {
     const objects = [];
 
     for (const other of this.players.values()) {
+      if (other.plane !== player.plane) continue;
       if (chebyshev(player.x, player.y, other.x, other.y) > VIEW_RADIUS) continue;
       const seenVersion = player.seen.get(other.id);
       const entry = {
@@ -3849,7 +4308,7 @@ class Game {
     }
 
     for (const npc of this.npcs.values()) {
-      if (npc.dead) continue;
+      if (npc.dead || npc.plane !== player.plane) continue;
       if (chebyshev(player.x, player.y, npc.x, npc.y) > VIEW_RADIUS) continue;
       npcs.push({
         id: npc.id,
@@ -3868,15 +4327,17 @@ class Game {
     }
 
     for (const item of this.groundItems.values()) {
+      if (item.plane !== player.plane) continue;
       if (chebyshev(player.x, player.y, item.x, item.y) > VIEW_RADIUS) continue;
       items.push({ id: item.id, itemId: item.itemId, count: item.count, x: item.x, y: item.y });
     }
 
-    for (const obj of this.world.objects) {
+    for (const obj of planeAt(this.world, player.plane).objects) {
       if (chebyshev(player.x, player.y, obj.x, obj.y) > VIEW_RADIUS) continue;
       if (obj.depletedUntil > this.tickCount) objects.push({ id: obj.id, depleted: true });
     }
     for (const obj of this.dynamicObjects.values()) {
+      if (obj.plane !== player.plane) continue;
       if (chebyshev(player.x, player.y, obj.x, obj.y) > VIEW_RADIUS) continue;
       objects.push({ id: obj.id, type: obj.type, x: obj.x, y: obj.y, dynamic: true });
     }
@@ -3886,6 +4347,7 @@ class Game {
       self: {
         x: player.x,
         y: player.y,
+        plane: player.plane,
         dir: player.dir,
         hp: player.hp,
         maxHp: this.maxHp(player),
@@ -3895,7 +4357,7 @@ class Game {
         dead: player.dead,
         inCombat: player.combat.timer > 0,
         targetId: player.combat.targetId,
-        region: regionAt(this.world, player.x, player.y).name,
+        region: regionAt(this.world, player.x, player.y, player.plane).name,
         busy: Boolean(player.action)
       },
       players,
@@ -3908,6 +4370,12 @@ class Game {
 }
 
 // ---------------------------------------------------------------- utilities
+
+/** Keeps a loaded save on a plane that actually exists. */
+function clampPlane(value) {
+  const plane = Math.floor(Number(value));
+  return Number.isFinite(plane) && plane >= 0 && plane < PLANE_COUNT ? plane : SURFACE;
+}
 
 function directionBetween(fromX, fromY, toX, toY) {
   const dx = toX - fromX;
@@ -4636,27 +5104,31 @@ function heuristic(x1, y1, x2, y2) {
   return 10 * (dx + dy) - 6 * Math.min(dx, dy);
 }
 
-function canStep(world, x, y, dx, dy, blocked) {
+function canStep(world, x, y, dx, dy, blocked, plane) {
   const nx = x + dx;
   const ny = y + dy;
-  if (!isWalkable(world, nx, ny) || blocked(nx, ny)) return false;
+  if (!isWalkable(world, nx, ny, plane) || blocked(nx, ny)) return false;
   if (dx !== 0 && dy !== 0) {
-    if (!isWalkable(world, x + dx, y) || blocked(x + dx, y)) return false;
-    if (!isWalkable(world, x, y + dy) || blocked(x, y + dy)) return false;
+    if (!isWalkable(world, x + dx, y, plane) || blocked(x + dx, y)) return false;
+    if (!isWalkable(world, x, y + dy, plane) || blocked(x, y + dy)) return false;
   }
   return true;
 }
 
 /**
- * Finds a path from (sx,sy) to (tx,ty).
+ * Finds a path from (sx,sy) to (tx,ty) on one plane. There is no route between
+ * planes: a ladder is an action, not a step, so the search never leaves the
+ * level it started on.
  *
  * @param {object} opts.blocked   extra "is this tile occupied" predicate
  * @param {number} opts.range     stop as soon as we are within this many tiles
+ * @param {number} opts.plane     which level of the world to search
  * @returns {Array<{x:number,y:number}>} steps excluding the start tile
  */
 function findPath(world, sx, sy, tx, ty, opts = {}) {
   const blocked = opts.blocked || (() => false);
   const range = opts.range ?? 0;
+  const plane = opts.plane ?? 0;
   if (sx === tx && sy === ty) return [];
 
   const withinGoal = (x, y) => Math.max(Math.abs(x - tx), Math.abs(y - ty)) <= range;
@@ -4688,7 +5160,7 @@ function findPath(world, sx, sy, tx, ty, opts = {}) {
     if (withinGoal(current.x, current.y)) return reconstruct(cameFrom, current);
 
     for (const dir of DIRS) {
-      if (!canStep(world, current.x, current.y, dir.dx, dir.dy, blocked)) continue;
+      if (!canStep(world, current.x, current.y, dir.dx, dir.dy, blocked, plane)) continue;
       const nx = current.x + dir.dx;
       const ny = current.y + dir.dy;
       const key = nx * 10000 + ny;
@@ -5597,12 +6069,20 @@ __modules["client/js/renderer.js"] = function (__exports, __require) {
  * movement looks continuous without the client ever predicting the future.
  */
 const { TILE_SIZE, TILE, BLOCKED_TILES } = __require("shared/constants.js");
-const { OBJECT_TYPES } = __require("shared/world.js");
+const { OBJECT_TYPES, planeAt } = __require("shared/world.js");
 const { state } = __require("client/js/state.js");
 const { itemSprite, noise2, npcSprite, objectSprite, playerSprite, tileSprite } = __require("client/js/sprites.js");
 const { ISO_TILE_H, ISO_TILE_W, isoProject, isoUnproject } = __require("client/js/iso.js");
 const { isoCubeSprite, isoFloorSprite, isoNpcSprite, isoPlayerSprite, isoPropSprite, ISO_CHAR_H, ISO_CHAR_W } = __require("client/js/isoSprites.js");
 const SPLAT_LIFETIME = 1200;
+
+/** Which cube art stands in for each solid tile. */
+const CUBE_FOR_TILE = {
+  [TILE.ROCKFACE]: 'rockface',
+  [TILE.WALL]: 'wall',
+  [TILE.MINE_WALL]: 'mine_wall',
+  [TILE.CRYSTAL]: 'crystal'
+};
 
 /** Maps a facing to the pair (sprite view, mirrored) used by the iso art. */
 function isoFacing(dir) {
@@ -5630,6 +6110,15 @@ class Renderer {
 
   get isometric() {
     return (state.settings.projection || 'iso') === 'iso';
+  }
+
+  /**
+   * The plane the camera is on. Everything drawn - floors, solids, props - is
+   * read from here rather than from the world root, so climbing a ladder swaps
+   * the whole scene without the renderer knowing anything about ladders.
+   */
+  get level() {
+    return planeAt(this.world, state.self.plane || 0);
   }
 
   /** Zoom, with a nudge upwards on small screens so touch targets stay usable. */
@@ -5762,7 +6251,9 @@ class Renderer {
     this.camX += (state.self.x - this.camX) * camSpeed;
     this.camY += (state.self.y - this.camY) * camSpeed;
 
-    ctx.fillStyle = this.isometric ? '#0a0f14' : '#0c1116';
+    // Underground planes clear to their own colour, so a cave feels like a
+    // cave before a single tile has been drawn.
+    ctx.fillStyle = this.level.ambient || (this.isometric ? '#0a0f14' : '#0c1116');
     ctx.fillRect(0, 0, this.cssWidth, this.cssHeight);
 
     const bounds = this.visibleBounds();
@@ -5801,12 +6292,15 @@ class Renderer {
   drawFloors(bounds, now) {
     const ctx = this.ctx;
     const iso = this.isometric;
+    const tiles = this.level.tiles;
     const w = iso ? this.halfW * 2 : this.tileSize;
     const h = iso ? this.halfH * 2 : this.tileSize;
 
     for (let ty = bounds.minY; ty <= bounds.maxY; ty += 1) {
       for (let tx = bounds.minX; tx <= bounds.maxX; tx += 1) {
-        const tile = this.world.tiles[ty * this.world.width + tx];
+        const tile = tiles[ty * this.world.width + tx];
+        // Undug rock: there is nothing there to draw, at all.
+        if (tile === TILE.VOID) continue;
         // Walls and cliffs are solids, drawn later as cubes.
         if (iso && BLOCKED_TILES.has(tile) && tile !== TILE.WATER) continue;
         const variant = Math.floor(noise2(tx, ty, tile) * 4);
@@ -5844,9 +6338,10 @@ class Renderer {
         const depth = iso ? tx + ty : ty;
 
         // Solid terrain becomes a cube in the isometric view.
-        const tile = this.world.tiles[ty * this.world.width + tx];
+        const tile = this.level.tiles[ty * this.world.width + tx];
+        if (tile === TILE.VOID) continue;
         if (iso && BLOCKED_TILES.has(tile) && tile !== TILE.WATER) {
-          const sprite = isoCubeSprite(tile === TILE.ROCKFACE ? 'rockface' : 'wall');
+          const sprite = isoCubeSprite(CUBE_FOR_TILE[tile] || 'wall');
           const p = this.project(tx, ty);
           const w = sprite.width * this.scale;
           const h = sprite.height * this.scale;
@@ -5863,7 +6358,7 @@ class Renderer {
           continue;
         }
 
-        const obj = this.world.objectAt.get(`${tx},${ty}`);
+        const obj = this.level.objectAt.get(`${tx},${ty}`);
         if (!obj || obj.dynamic) continue;
         const def = OBJECT_TYPES[obj.type];
         if (!def) continue;
@@ -6265,10 +6760,19 @@ class Minimap {
     this.ctx = canvas.getContext('2d');
     this.world = world;
     this.scale = 2;
-    this.base = this.rasterise();
+    // One raster per plane, built the first time you set foot on it. Three mine
+    // levels is three cheap 192x192 bitmaps, so there is nothing to gain from
+    // being cleverer than a cache.
+    this.bases = new Map();
   }
 
-  rasterise() {
+  baseFor(plane) {
+    if (!this.bases.has(plane)) this.bases.set(plane, this.rasterise(plane));
+    return this.bases.get(plane);
+  }
+
+  rasterise(plane = 0) {
+    const level = planeAt(this.world, plane);
     const off = document.createElement('canvas');
     off.width = this.world.width * this.scale;
     off.height = this.world.height * this.scale;
@@ -6286,16 +6790,24 @@ class Minimap {
       [TILE.PLANK]: '#8a6136',
       [TILE.BRIDGE]: '#9a6f3f',
       [TILE.CAVE]: '#5b5349',
-      [TILE.ROCKFACE]: '#3f3a34'
+      [TILE.ROCKFACE]: '#3f3a34',
+      [TILE.MINE_FLOOR]: '#443f3d',
+      [TILE.MINE_WALL]: '#2b2724',
+      [TILE.EMBER]: '#4a2a22',
+      [TILE.CRYSTAL]: '#2a1d2e'
     };
     for (let y = 0; y < this.world.height; y += 1) {
       for (let x = 0; x < this.world.width; x += 1) {
-        ctx.fillStyle = colours[this.world.tiles[y * this.world.width + x]] || '#4a7c3f';
+        const tile = level.tiles[y * this.world.width + x];
+        // Undug rock is left transparent, so the map of a mine is the shape of
+        // the mine rather than a filled square.
+        if (tile === TILE.VOID) continue;
+        ctx.fillStyle = colours[tile] || '#4a7c3f';
         ctx.fillRect(x * this.scale, y * this.scale, this.scale, this.scale);
       }
     }
     ctx.fillStyle = '#20401f';
-    for (const obj of this.world.objects) {
+    for (const obj of level.objects) {
       const def = OBJECT_TYPES[obj.type];
       if (!def) continue;
       if (def.art === 'tree' || def.art === 'oak' || def.art === 'willow') {
@@ -6313,9 +6825,10 @@ class Minimap {
     const cx = state.self.x * this.scale;
     const cy = state.self.y * this.scale;
     ctx.imageSmoothingEnabled = false;
-    ctx.fillStyle = '#0c1116';
+    const level = planeAt(this.world, state.self.plane || 0);
+    ctx.fillStyle = level.ambient || '#0c1116';
     ctx.fillRect(0, 0, size, size);
-    ctx.drawImage(this.base, cx - src / 2, cy - src / 2, src, src, 0, 0, size, size);
+    ctx.drawImage(this.baseFor(state.self.plane || 0), cx - src / 2, cy - src / 2, src, src, 0, 0, size, size);
 
     const toScreen = (x, y) => ({
       x: ((x - state.self.x) / tilesVisible + 0.5) * size,
@@ -6502,6 +7015,48 @@ const TILE_PAINTERS = {
     ctx.fillStyle = '#4b463f';
     ctx.fillRect(2, 2, w - 6, h - 8);
     speckle(ctx, w, h, ['#57514a', '#332f2a'], 0.3, v + 19);
+  },
+
+  // ----------------------------------------------------------- underground
+  // The three mine levels each get their own floor and wall so that a glance
+  // at the screen tells you how deep you are.
+  [TILE.MINE_FLOOR]: (ctx, w, h, v) => {
+    ctx.fillStyle = '#443f3d';
+    ctx.fillRect(0, 0, w, h);
+    speckle(ctx, w, h, ['#4d4744', '#3b3634', '#544c47'], 0.34, v + 23);
+  },
+  [TILE.MINE_WALL]: (ctx, w, h, v) => {
+    ctx.fillStyle = '#2b2724';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#37322e';
+    ctx.fillRect(2, 2, w - 6, h - 8);
+    speckle(ctx, w, h, ['#413a35', '#221f1c'], 0.28, v + 29);
+  },
+  [TILE.EMBER]: (ctx, w, h, v) => {
+    ctx.fillStyle = '#4a2a22';
+    ctx.fillRect(0, 0, w, h);
+    speckle(ctx, w, h, ['#5c3428', '#3d221c', '#6b3c2b'], 0.3, v + 31);
+    // A few coals still glowing under the crust.
+    for (let i = 0; i < 2; i += 1) {
+      const x = Math.floor(noise2(i, v, 41) * (w - 4)) + 2;
+      const y = Math.floor(noise2(v, i, 43) * (h - 4)) + 2;
+      ctx.fillStyle = i === 0 ? '#e2703a' : '#f0a44c';
+      ctx.fillRect(x, y, 2, 2);
+    }
+  },
+  [TILE.CRYSTAL]: (ctx, w, h, v) => {
+    ctx.fillStyle = '#2a1d2e';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#3a2a40';
+    ctx.fillRect(2, 2, w - 6, h - 8);
+    ctx.fillStyle = 'rgba(190,140,255,0.35)';
+    ctx.fillRect(w * 0.3, h * 0.2, 3, h * 0.5);
+    speckle(ctx, w, h, ['#4a3654', '#241a28'], 0.24, v + 37);
+  },
+  // Solid rock nobody has dug into. Drawn as nothing, so the mine reads as an
+  // island of worked stone rather than a rectangle with a border.
+  [TILE.VOID]: (ctx, w, h) => {
+    ctx.clearRect(0, 0, w, h);
   }
 };
 function tileSprite(tile, variant, size) {
@@ -6512,6 +7067,34 @@ function tileSprite(tile, variant, size) {
 // ----------------------------------------------------------------- objects
 
 const OBJECT_PAINTERS = {
+  ladder_down: (ctx, w, h) => drawLadder(ctx, w, h, 'down'),
+  ladder_up: (ctx, w, h) => drawLadder(ctx, w, h, 'up'),
+  mine_entrance: (ctx, w, h) => {
+    // A timbered mouth in the rock, with the dark of the shaft behind it.
+    ctx.fillStyle = '#17120f';
+    ctx.beginPath();
+    ctx.moveTo(w * 0.18, h * 0.92);
+    ctx.lineTo(w * 0.18, h * 0.46);
+    ctx.quadraticCurveTo(w * 0.5, h * 0.2, w * 0.82, h * 0.46);
+    ctx.lineTo(w * 0.82, h * 0.92);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#7a5a32';
+    ctx.fillRect(w * 0.12, h * 0.44, w * 0.1, h * 0.5);
+    ctx.fillRect(w * 0.78, h * 0.44, w * 0.1, h * 0.5);
+    ctx.fillRect(w * 0.12, h * 0.36, w * 0.76, h * 0.1);
+  },
+  mine_cart: (ctx, w, h) => {
+    ctx.fillStyle = '#5a5148';
+    ctx.fillRect(w * 0.18, h * 0.42, w * 0.64, h * 0.34);
+    ctx.fillStyle = '#3b352f';
+    ctx.fillRect(w * 0.22, h * 0.46, w * 0.56, h * 0.12);
+    ctx.fillStyle = '#2a2622';
+    ctx.beginPath();
+    ctx.arc(w * 0.32, h * 0.8, w * 0.09, 0, Math.PI * 2);
+    ctx.arc(w * 0.68, h * 0.8, w * 0.09, 0, Math.PI * 2);
+    ctx.fill();
+  },
   tree: (ctx, w, h) => drawTree(ctx, w, h, '#2f6d3f', '#3f8a4f'),
   oak: (ctx, w, h) => drawTree(ctx, w, h, '#3a6b2c', '#4d8a3a'),
   willow: (ctx, w, h) => drawTree(ctx, w, h, '#6d8a3a', '#8aa84c', true),
@@ -6649,6 +7232,45 @@ function drawTree(ctx, w, h, dark, light, droopy = false) {
   }
 }
 
+/** A ladder, drawn tall so it reads as something you climb rather than step over. */
+function drawLadder(ctx, w, h, direction) {
+  const x0 = w * 0.3;
+  const x1 = w * 0.7;
+  const top = h * 0.12;
+  const bottom = h * 0.92;
+  ctx.strokeStyle = '#7a5a32';
+  ctx.lineWidth = Math.max(2, w * 0.07);
+  ctx.beginPath();
+  ctx.moveTo(x0, top);
+  ctx.lineTo(x0, bottom);
+  ctx.moveTo(x1, top);
+  ctx.lineTo(x1, bottom);
+  ctx.stroke();
+  ctx.strokeStyle = '#9a7642';
+  ctx.lineWidth = Math.max(1, w * 0.05);
+  for (let i = 0; i <= 5; i += 1) {
+    const y = top + ((bottom - top) * i) / 5;
+    ctx.beginPath();
+    ctx.moveTo(x0, y);
+    ctx.lineTo(x1, y);
+    ctx.stroke();
+  }
+  // An arrow at the end you would be heading towards.
+  ctx.fillStyle = '#f2c14e';
+  ctx.beginPath();
+  if (direction === 'down') {
+    ctx.moveTo(w * 0.5, bottom);
+    ctx.lineTo(w * 0.4, bottom - h * 0.1);
+    ctx.lineTo(w * 0.6, bottom - h * 0.1);
+  } else {
+    ctx.moveTo(w * 0.5, top);
+    ctx.lineTo(w * 0.4, top + h * 0.1);
+    ctx.lineTo(w * 0.6, top + h * 0.1);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
 function drawRock(ctx, w, h, oreColour) {
   ctx.fillStyle = '#6d675e';
   ctx.beginPath();
@@ -6670,7 +7292,8 @@ function drawRock(ctx, w, h, oreColour) {
 }
 function objectSprite(art, size) {
   const painter = OBJECT_PAINTERS[art] || OBJECT_PAINTERS.stump;
-  const height = art === 'tree' || art === 'oak' || art === 'willow' || art === 'furnace' ? size * 2 : size;
+  const TALL = ['tree', 'oak', 'willow', 'furnace', 'ladder_up', 'ladder_down', 'mine_entrance'];
+  const height = TALL.includes(art) ? size * 2 : size;
   return cached(`obj:${art}:${size}`, size, height, (ctx, w, h) => painter(ctx, w, h));
 }
 
@@ -7221,7 +7844,11 @@ const FLOORS = {
   [TILE.PLANK]: { base: '#8a6136', grain: ['#96693c', '#7c5730'], boards: true },
   [TILE.BRIDGE]: { base: '#9a6f3f', grain: ['#a87a46', '#8a6236'], boards: true },
   [TILE.CAVE]: { base: '#5b5349', grain: ['#665d52', '#514a41', '#6f665a'], pebbles: 5 },
-  [TILE.WATER]: { base: '#2f6f9e', grain: ['#356f9c', '#2a648f'], water: true }
+  [TILE.WATER]: { base: '#2f6f9e', grain: ['#356f9c', '#2a648f'], water: true },
+  // Underground. Each mine level gets its own floor so depth is legible at a
+  // glance, without a single word of interface.
+  [TILE.MINE_FLOOR]: { base: '#443f3d', grain: ['#4d4744', '#3b3634', '#544c47'], pebbles: 6 },
+  [TILE.EMBER]: { base: '#4a2a22', grain: ['#5c3428', '#3d221c', '#6b3c2b'], pebbles: 4, embers: true }
 };
 
 function floorTexture(ctx, w, h, def, variant) {
@@ -7291,6 +7918,20 @@ function floorTexture(ctx, w, h, def, variant) {
         ctx.lineTo(x + blade * 3, y - 3);
         ctx.stroke();
       }
+    }
+  }
+
+  if (def.embers) {
+    // Cracks in the crust, with something warm underneath.
+    for (let i = 0; i < 3; i += 1) {
+      const x = 12 + noise2(i, variant, 53) * (w - 24);
+      const y = 8 + noise2(variant, i, 59) * (h - 14);
+      ctx.fillStyle = i === 0 ? '#f0a44c' : '#d4622f';
+      ctx.fillRect(Math.floor(x), Math.floor(y), 2, 1);
+      ctx.fillStyle = 'rgba(255,150,60,0.22)';
+      ctx.beginPath();
+      ctx.ellipse(x + 1, y, 5, 3, 0, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 
@@ -7447,6 +8088,47 @@ const CUBES = {
       ctx.lineTo(w * 0.92, midY + height * 0.25);
       ctx.lineTo(w * 0.92, midY + height * 0.7);
       ctx.lineTo(w * 0.62, lowY + height * 0.72);
+      ctx.closePath();
+      ctx.fill();
+    }
+  },
+  mine_wall: {
+    colour: '#37322e',
+    height: ISO_WALL_H + 10,
+    decorate: (ctx, w, h, midY, height, lowY) => {
+      // Pick marks: this rock was cut, not weathered.
+      ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 5; i += 1) {
+        const y = midY + height * (0.18 + i * 0.15);
+        ctx.beginPath();
+        ctx.moveTo(w * 0.1, y);
+        ctx.lineTo(w * 0.3, y + 5);
+        ctx.moveTo(w * 0.7, y + 4);
+        ctx.lineTo(w * 0.9, y - 1);
+        ctx.stroke();
+      }
+    }
+  },
+  crystal: {
+    colour: '#3a2a40',
+    height: ISO_WALL_H + 20,
+    decorate: (ctx, w, h, midY, height, lowY) => {
+      // Veins of something that has not seen daylight in a very long time.
+      ctx.fillStyle = 'rgba(186,140,255,0.4)';
+      ctx.beginPath();
+      ctx.moveTo(w * 0.2, midY + height * 0.2);
+      ctx.lineTo(w * 0.32, lowY + height * 0.34);
+      ctx.lineTo(w * 0.24, lowY + height * 0.78);
+      ctx.lineTo(w * 0.14, midY + height * 0.66);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,206,120,0.28)';
+      ctx.beginPath();
+      ctx.moveTo(w * 0.68, lowY + height * 0.28);
+      ctx.lineTo(w * 0.86, midY + height * 0.34);
+      ctx.lineTo(w * 0.84, midY + height * 0.74);
+      ctx.lineTo(w * 0.66, lowY + height * 0.74);
       ctx.closePath();
       ctx.fill();
     }
@@ -7612,7 +8294,90 @@ function drawIsoBox(ctx, w, h, { width = 40, depth = 40, height = 26, colour = '
   if (top) top(ctx, { cx, topY: top4.n.y, baseY, width, height, corners: top4 });
 }
 
+/**
+ * A ladder leaning into a shaft. The shaft itself is a dark diamond sunk into
+ * the tile, so the eye reads "hole" before it reads "prop" - which is what
+ * makes clicking one feel obvious rather than learned.
+ */
+function drawIsoLadder(ctx, w, h, direction) {
+  const baseY = h - ISO_TILE_H / 2;
+
+  // The opening.
+  ctx.fillStyle = '#0b0806';
+  ctx.beginPath();
+  ctx.moveTo(w / 2, baseY - ISO_TILE_H * 0.42);
+  ctx.lineTo(w / 2 + ISO_TILE_W * 0.38, baseY);
+  ctx.lineTo(w / 2, baseY + ISO_TILE_H * 0.42);
+  ctx.lineTo(w / 2 - ISO_TILE_W * 0.38, baseY);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Two rails running up out of the hole, and rungs between them.
+  const topY = baseY - (direction === 'down' ? 30 : 62);
+  const railL = w / 2 - 8;
+  const railR = w / 2 + 8;
+  ctx.strokeStyle = shade('#7a5a32', FACE.top);
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(railL, baseY + 4);
+  ctx.lineTo(railL - 3, topY);
+  ctx.moveTo(railR, baseY + 4);
+  ctx.lineTo(railR - 3, topY);
+  ctx.stroke();
+  ctx.strokeStyle = shade('#9a7642', FACE.left);
+  ctx.lineWidth = 2;
+  const rungs = direction === 'down' ? 3 : 6;
+  for (let i = 0; i <= rungs; i += 1) {
+    const t = i / rungs;
+    const y = baseY + 4 + (topY - baseY - 4) * t;
+    ctx.beginPath();
+    ctx.moveTo(railL - 3 * t, y);
+    ctx.lineTo(railR - 3 * t, y);
+    ctx.stroke();
+  }
+}
+
 const PROPS = {
+  ladder_down: (ctx, w, h) => drawIsoLadder(ctx, w, h, 'down'),
+  ladder_up: (ctx, w, h) => drawIsoLadder(ctx, w, h, 'up'),
+  mine_entrance: (ctx, w, h) => {
+    const baseY = h - ISO_TILE_H / 2;
+    propShadow(ctx, w, h, 0.6);
+    // Dark mouth.
+    ctx.fillStyle = '#100c0a';
+    ctx.beginPath();
+    ctx.moveTo(w * 0.24, baseY);
+    ctx.lineTo(w * 0.24, baseY - 34);
+    ctx.quadraticCurveTo(w * 0.5, baseY - 62, w * 0.76, baseY - 34);
+    ctx.lineTo(w * 0.76, baseY);
+    ctx.closePath();
+    ctx.fill();
+    // Timber frame.
+    ctx.fillStyle = shade('#7a5a32', FACE.left);
+    ctx.fillRect(w * 0.18, baseY - 44, 7, 46);
+    ctx.fillStyle = shade('#7a5a32', FACE.right);
+    ctx.fillRect(w * 0.75, baseY - 44, 7, 46);
+    ctx.fillStyle = shade('#8a6a3c', FACE.top);
+    ctx.fillRect(w * 0.16, baseY - 52, w * 0.66, 9);
+    // Spoil heap either side, so it sits in the ground rather than on it.
+    ctx.fillStyle = shade('#5b5349', FACE.left);
+    ctx.beginPath();
+    ctx.ellipse(w * 0.5, baseY + 2, ISO_TILE_W * 0.42, ISO_TILE_H * 0.36, 0, 0, Math.PI * 2);
+    ctx.fill();
+  },
+  mine_cart: (ctx, w, h) => {
+    const baseY = h - ISO_TILE_H / 2;
+    propShadow(ctx, w, h, 0.44);
+    drawIsoBox(ctx, w, h, { width: 34, depth: 22, height: 16, colour: '#5a5148' });
+    ctx.fillStyle = '#2a2622';
+    ctx.beginPath();
+    ctx.ellipse(w * 0.38, baseY, 5, 3, 0, 0, Math.PI * 2);
+    ctx.ellipse(w * 0.62, baseY, 5, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+  },
   tree: (ctx, w, h) => drawIsoTree(ctx, w, h, '#6b4a28', '#3f8a4f', 'tree'),
   oak: (ctx, w, h) => drawIsoTree(ctx, w, h, '#5f4326', '#4d8a3a', 'oak'),
   willow: (ctx, w, h) => drawIsoTree(ctx, w, h, '#6b5a34', '#8aa84c', 'willow'),
@@ -7789,6 +8554,7 @@ const PROPS = {
 
 /** Height in pixels above the tile footprint for each prop. */
 const PROP_HEIGHTS = {
+  ladder_down: 44, ladder_up: 76, mine_entrance: 72, mine_cart: 40,
   tree: 110, oak: 116, willow: 104, stump: 34,
   rock_copper: 56, rock_tin: 56, rock_iron: 56, rock_coal: 56, rock_spent: 56,
   fish_spot: 34, bank: 62, counter: 58, furnace: 96, anvil: 56, range: 66,
@@ -8378,9 +9144,17 @@ function inventoryActions(index) {
   return list;
 }
 
+const OBJECT_EXAMINES = {
+  mine_entrance: 'A timbered shaft going down into the dark.',
+  ladder_down: 'It goes down. Further than you can see.',
+  ladder_up: 'It goes back up towards the daylight.',
+  mine_cart: 'Rusted solid to its rails.'
+};
+
 function describeObject(type) {
   const def = OBJECT_TYPES[type];
   if (!def) return 'You are not sure what it is.';
+  if (OBJECT_EXAMINES[type]) return OBJECT_EXAMINES[type];
   if (def.action?.skill) return `Requires ${def.action.skill} level ${def.action.level}.`;
   return 'Looks useful.';
 }

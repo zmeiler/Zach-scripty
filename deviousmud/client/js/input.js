@@ -6,7 +6,7 @@
  */
 
 import { actions } from './actions.js';
-import { state } from './state.js';
+import { bus, state } from './state.js';
 import { closeMenu, isMenuOpen, openMenu, worldActions } from './ui/menu.js';
 import { focusChat, isChatFocused } from './ui/chat.js';
 import { showPanel } from './ui/panels.js';
@@ -59,6 +59,10 @@ export function initInput({ canvas, renderer, minimap, minimapCanvas }) {
     renderer.hoverTile = null;
     hint('');
   });
+
+  // Changing plane teleports the world out from under the cursor, so whatever
+  // the hint was describing is no longer there to describe.
+  bus.on('plane', () => hint(''));
 
   canvas.addEventListener('pointerup', (event) => {
     clearTimeout(longPressTimer);

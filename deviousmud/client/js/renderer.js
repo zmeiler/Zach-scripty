@@ -12,13 +12,21 @@
  */
 
 import { TILE_SIZE, TILE, BLOCKED_TILES } from '../../shared/constants.js';
-import { OBJECT_TYPES } from '../../shared/world.js';
+import { OBJECT_TYPES, planeAt } from '../../shared/world.js';
 import { state } from './state.js';
 import { itemSprite, noise2, npcSprite, objectSprite, playerSprite, tileSprite } from './sprites.js';
 import { ISO_TILE_H, ISO_TILE_W, isoProject, isoUnproject } from './iso.js';
 import { isoCubeSprite, isoFloorSprite, isoNpcSprite, isoPlayerSprite, isoPropSprite, ISO_CHAR_H, ISO_CHAR_W } from './isoSprites.js';
 
 const SPLAT_LIFETIME = 1200;
+
+/** Which cube art stands in for each solid tile. */
+const CUBE_FOR_TILE = {
+  [TILE.ROCKFACE]: 'rockface',
+  [TILE.WALL]: 'wall',
+  [TILE.MINE_WALL]: 'mine_wall',
+  [TILE.CRYSTAL]: 'crystal'
+};
 
 /** Maps a facing to the pair (sprite view, mirrored) used by the iso art. */
 function isoFacing(dir) {
@@ -47,6 +55,15 @@ export class Renderer {
 
   get isometric() {
     return (state.settings.projection || 'iso') === 'iso';
+  }
+
+  /**
+   * The plane the camera is on. Everything drawn - floors, solids, props - is
+   * read from here rather than from the world root, so climbing a ladder swaps
+   * the whole scene without the renderer knowing anything about ladders.
+   */
+  get level() {
+    return planeAt(this.world, state.self.plane || 0);
   }
 
   /** Zoom, with a nudge upwards on small screens so touch targets stay usable. */
@@ -179,7 +196,9 @@ export class Renderer {
     this.camX += (state.self.x - this.camX) * camSpeed;
     this.camY += (state.self.y - this.camY) * camSpeed;
 
-    ctx.fillStyle = this.isometric ? '#0a0f14' : '#0c1116';
+    // Underground planes clear to their own colour, so a cave feels like a
+    // cave before a single tile has been drawn.
+    ctx.fillStyle = this.level.ambient || (this.isometric ? '#0a0f14' : '#0c1116');
     ctx.fillRect(0, 0, this.cssWidth, this.cssHeight);
 
     const bounds = this.visibleBounds();
@@ -218,12 +237,15 @@ export class Renderer {
   drawFloors(bounds, now) {
     const ctx = this.ctx;
     const iso = this.isometric;
+    const tiles = this.level.tiles;
     const w = iso ? this.halfW * 2 : this.tileSize;
     const h = iso ? this.halfH * 2 : this.tileSize;
 
     for (let ty = bounds.minY; ty <= bounds.maxY; ty += 1) {
       for (let tx = bounds.minX; tx <= bounds.maxX; tx += 1) {
-        const tile = this.world.tiles[ty * this.world.width + tx];
+        const tile = tiles[ty * this.world.width + tx];
+        // Undug rock: there is nothing there to draw, at all.
+        if (tile === TILE.VOID) continue;
         // Walls and cliffs are solids, drawn later as cubes.
         if (iso && BLOCKED_TILES.has(tile) && tile !== TILE.WATER) continue;
         const variant = Math.floor(noise2(tx, ty, tile) * 4);
@@ -261,9 +283,10 @@ export class Renderer {
         const depth = iso ? tx + ty : ty;
 
         // Solid terrain becomes a cube in the isometric view.
-        const tile = this.world.tiles[ty * this.world.width + tx];
+        const tile = this.level.tiles[ty * this.world.width + tx];
+        if (tile === TILE.VOID) continue;
         if (iso && BLOCKED_TILES.has(tile) && tile !== TILE.WATER) {
-          const sprite = isoCubeSprite(tile === TILE.ROCKFACE ? 'rockface' : 'wall');
+          const sprite = isoCubeSprite(CUBE_FOR_TILE[tile] || 'wall');
           const p = this.project(tx, ty);
           const w = sprite.width * this.scale;
           const h = sprite.height * this.scale;
@@ -280,7 +303,7 @@ export class Renderer {
           continue;
         }
 
-        const obj = this.world.objectAt.get(`${tx},${ty}`);
+        const obj = this.level.objectAt.get(`${tx},${ty}`);
         if (!obj || obj.dynamic) continue;
         const def = OBJECT_TYPES[obj.type];
         if (!def) continue;
@@ -682,10 +705,19 @@ export class Minimap {
     this.ctx = canvas.getContext('2d');
     this.world = world;
     this.scale = 2;
-    this.base = this.rasterise();
+    // One raster per plane, built the first time you set foot on it. Three mine
+    // levels is three cheap 192x192 bitmaps, so there is nothing to gain from
+    // being cleverer than a cache.
+    this.bases = new Map();
   }
 
-  rasterise() {
+  baseFor(plane) {
+    if (!this.bases.has(plane)) this.bases.set(plane, this.rasterise(plane));
+    return this.bases.get(plane);
+  }
+
+  rasterise(plane = 0) {
+    const level = planeAt(this.world, plane);
     const off = document.createElement('canvas');
     off.width = this.world.width * this.scale;
     off.height = this.world.height * this.scale;
@@ -703,16 +735,24 @@ export class Minimap {
       [TILE.PLANK]: '#8a6136',
       [TILE.BRIDGE]: '#9a6f3f',
       [TILE.CAVE]: '#5b5349',
-      [TILE.ROCKFACE]: '#3f3a34'
+      [TILE.ROCKFACE]: '#3f3a34',
+      [TILE.MINE_FLOOR]: '#443f3d',
+      [TILE.MINE_WALL]: '#2b2724',
+      [TILE.EMBER]: '#4a2a22',
+      [TILE.CRYSTAL]: '#2a1d2e'
     };
     for (let y = 0; y < this.world.height; y += 1) {
       for (let x = 0; x < this.world.width; x += 1) {
-        ctx.fillStyle = colours[this.world.tiles[y * this.world.width + x]] || '#4a7c3f';
+        const tile = level.tiles[y * this.world.width + x];
+        // Undug rock is left transparent, so the map of a mine is the shape of
+        // the mine rather than a filled square.
+        if (tile === TILE.VOID) continue;
+        ctx.fillStyle = colours[tile] || '#4a7c3f';
         ctx.fillRect(x * this.scale, y * this.scale, this.scale, this.scale);
       }
     }
     ctx.fillStyle = '#20401f';
-    for (const obj of this.world.objects) {
+    for (const obj of level.objects) {
       const def = OBJECT_TYPES[obj.type];
       if (!def) continue;
       if (def.art === 'tree' || def.art === 'oak' || def.art === 'willow') {
@@ -730,9 +770,10 @@ export class Minimap {
     const cx = state.self.x * this.scale;
     const cy = state.self.y * this.scale;
     ctx.imageSmoothingEnabled = false;
-    ctx.fillStyle = '#0c1116';
+    const level = planeAt(this.world, state.self.plane || 0);
+    ctx.fillStyle = level.ambient || '#0c1116';
     ctx.fillRect(0, 0, size, size);
-    ctx.drawImage(this.base, cx - src / 2, cy - src / 2, src, src, 0, 0, size, size);
+    ctx.drawImage(this.baseFor(state.self.plane || 0), cx - src / 2, cy - src / 2, src, src, 0, 0, size, size);
 
     const toScreen = (x, y) => ({
       x: ((x - state.self.x) / tilesVisible + 0.5) * size,

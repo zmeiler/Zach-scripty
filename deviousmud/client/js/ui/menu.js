@@ -98,9 +98,17 @@ export function inventoryActions(index) {
   return list;
 }
 
+const OBJECT_EXAMINES = {
+  mine_entrance: 'A timbered shaft going down into the dark.',
+  ladder_down: 'It goes down. Further than you can see.',
+  ladder_up: 'It goes back up towards the daylight.',
+  mine_cart: 'Rusted solid to its rails.'
+};
+
 function describeObject(type) {
   const def = OBJECT_TYPES[type];
   if (!def) return 'You are not sure what it is.';
+  if (OBJECT_EXAMINES[type]) return OBJECT_EXAMINES[type];
   if (def.action?.skill) return `Requires ${def.action.skill} level ${def.action.level}.`;
   return 'Looks useful.';
 }

@@ -52,7 +52,11 @@ const FLOORS = {
   [TILE.PLANK]: { base: '#8a6136', grain: ['#96693c', '#7c5730'], boards: true },
   [TILE.BRIDGE]: { base: '#9a6f3f', grain: ['#a87a46', '#8a6236'], boards: true },
   [TILE.CAVE]: { base: '#5b5349', grain: ['#665d52', '#514a41', '#6f665a'], pebbles: 5 },
-  [TILE.WATER]: { base: '#2f6f9e', grain: ['#356f9c', '#2a648f'], water: true }
+  [TILE.WATER]: { base: '#2f6f9e', grain: ['#356f9c', '#2a648f'], water: true },
+  // Underground. Each mine level gets its own floor so depth is legible at a
+  // glance, without a single word of interface.
+  [TILE.MINE_FLOOR]: { base: '#443f3d', grain: ['#4d4744', '#3b3634', '#544c47'], pebbles: 6 },
+  [TILE.EMBER]: { base: '#4a2a22', grain: ['#5c3428', '#3d221c', '#6b3c2b'], pebbles: 4, embers: true }
 };
 
 function floorTexture(ctx, w, h, def, variant) {
@@ -122,6 +126,20 @@ function floorTexture(ctx, w, h, def, variant) {
         ctx.lineTo(x + blade * 3, y - 3);
         ctx.stroke();
       }
+    }
+  }
+
+  if (def.embers) {
+    // Cracks in the crust, with something warm underneath.
+    for (let i = 0; i < 3; i += 1) {
+      const x = 12 + noise2(i, variant, 53) * (w - 24);
+      const y = 8 + noise2(variant, i, 59) * (h - 14);
+      ctx.fillStyle = i === 0 ? '#f0a44c' : '#d4622f';
+      ctx.fillRect(Math.floor(x), Math.floor(y), 2, 1);
+      ctx.fillStyle = 'rgba(255,150,60,0.22)';
+      ctx.beginPath();
+      ctx.ellipse(x + 1, y, 5, 3, 0, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 
@@ -279,6 +297,47 @@ const CUBES = {
       ctx.lineTo(w * 0.92, midY + height * 0.25);
       ctx.lineTo(w * 0.92, midY + height * 0.7);
       ctx.lineTo(w * 0.62, lowY + height * 0.72);
+      ctx.closePath();
+      ctx.fill();
+    }
+  },
+  mine_wall: {
+    colour: '#37322e',
+    height: ISO_WALL_H + 10,
+    decorate: (ctx, w, h, midY, height, lowY) => {
+      // Pick marks: this rock was cut, not weathered.
+      ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 5; i += 1) {
+        const y = midY + height * (0.18 + i * 0.15);
+        ctx.beginPath();
+        ctx.moveTo(w * 0.1, y);
+        ctx.lineTo(w * 0.3, y + 5);
+        ctx.moveTo(w * 0.7, y + 4);
+        ctx.lineTo(w * 0.9, y - 1);
+        ctx.stroke();
+      }
+    }
+  },
+  crystal: {
+    colour: '#3a2a40',
+    height: ISO_WALL_H + 20,
+    decorate: (ctx, w, h, midY, height, lowY) => {
+      // Veins of something that has not seen daylight in a very long time.
+      ctx.fillStyle = 'rgba(186,140,255,0.4)';
+      ctx.beginPath();
+      ctx.moveTo(w * 0.2, midY + height * 0.2);
+      ctx.lineTo(w * 0.32, lowY + height * 0.34);
+      ctx.lineTo(w * 0.24, lowY + height * 0.78);
+      ctx.lineTo(w * 0.14, midY + height * 0.66);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255,206,120,0.28)';
+      ctx.beginPath();
+      ctx.moveTo(w * 0.68, lowY + height * 0.28);
+      ctx.lineTo(w * 0.86, midY + height * 0.34);
+      ctx.lineTo(w * 0.84, midY + height * 0.74);
+      ctx.lineTo(w * 0.66, lowY + height * 0.74);
       ctx.closePath();
       ctx.fill();
     }
@@ -445,7 +504,90 @@ function drawIsoBox(ctx, w, h, { width = 40, depth = 40, height = 26, colour = '
   if (top) top(ctx, { cx, topY: top4.n.y, baseY, width, height, corners: top4 });
 }
 
+/**
+ * A ladder leaning into a shaft. The shaft itself is a dark diamond sunk into
+ * the tile, so the eye reads "hole" before it reads "prop" - which is what
+ * makes clicking one feel obvious rather than learned.
+ */
+function drawIsoLadder(ctx, w, h, direction) {
+  const baseY = h - ISO_TILE_H / 2;
+
+  // The opening.
+  ctx.fillStyle = '#0b0806';
+  ctx.beginPath();
+  ctx.moveTo(w / 2, baseY - ISO_TILE_H * 0.42);
+  ctx.lineTo(w / 2 + ISO_TILE_W * 0.38, baseY);
+  ctx.lineTo(w / 2, baseY + ISO_TILE_H * 0.42);
+  ctx.lineTo(w / 2 - ISO_TILE_W * 0.38, baseY);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Two rails running up out of the hole, and rungs between them.
+  const topY = baseY - (direction === 'down' ? 30 : 62);
+  const railL = w / 2 - 8;
+  const railR = w / 2 + 8;
+  ctx.strokeStyle = shade('#7a5a32', FACE.top);
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(railL, baseY + 4);
+  ctx.lineTo(railL - 3, topY);
+  ctx.moveTo(railR, baseY + 4);
+  ctx.lineTo(railR - 3, topY);
+  ctx.stroke();
+  ctx.strokeStyle = shade('#9a7642', FACE.left);
+  ctx.lineWidth = 2;
+  const rungs = direction === 'down' ? 3 : 6;
+  for (let i = 0; i <= rungs; i += 1) {
+    const t = i / rungs;
+    const y = baseY + 4 + (topY - baseY - 4) * t;
+    ctx.beginPath();
+    ctx.moveTo(railL - 3 * t, y);
+    ctx.lineTo(railR - 3 * t, y);
+    ctx.stroke();
+  }
+}
+
 const PROPS = {
+  ladder_down: (ctx, w, h) => drawIsoLadder(ctx, w, h, 'down'),
+  ladder_up: (ctx, w, h) => drawIsoLadder(ctx, w, h, 'up'),
+  mine_entrance: (ctx, w, h) => {
+    const baseY = h - ISO_TILE_H / 2;
+    propShadow(ctx, w, h, 0.6);
+    // Dark mouth.
+    ctx.fillStyle = '#100c0a';
+    ctx.beginPath();
+    ctx.moveTo(w * 0.24, baseY);
+    ctx.lineTo(w * 0.24, baseY - 34);
+    ctx.quadraticCurveTo(w * 0.5, baseY - 62, w * 0.76, baseY - 34);
+    ctx.lineTo(w * 0.76, baseY);
+    ctx.closePath();
+    ctx.fill();
+    // Timber frame.
+    ctx.fillStyle = shade('#7a5a32', FACE.left);
+    ctx.fillRect(w * 0.18, baseY - 44, 7, 46);
+    ctx.fillStyle = shade('#7a5a32', FACE.right);
+    ctx.fillRect(w * 0.75, baseY - 44, 7, 46);
+    ctx.fillStyle = shade('#8a6a3c', FACE.top);
+    ctx.fillRect(w * 0.16, baseY - 52, w * 0.66, 9);
+    // Spoil heap either side, so it sits in the ground rather than on it.
+    ctx.fillStyle = shade('#5b5349', FACE.left);
+    ctx.beginPath();
+    ctx.ellipse(w * 0.5, baseY + 2, ISO_TILE_W * 0.42, ISO_TILE_H * 0.36, 0, 0, Math.PI * 2);
+    ctx.fill();
+  },
+  mine_cart: (ctx, w, h) => {
+    const baseY = h - ISO_TILE_H / 2;
+    propShadow(ctx, w, h, 0.44);
+    drawIsoBox(ctx, w, h, { width: 34, depth: 22, height: 16, colour: '#5a5148' });
+    ctx.fillStyle = '#2a2622';
+    ctx.beginPath();
+    ctx.ellipse(w * 0.38, baseY, 5, 3, 0, 0, Math.PI * 2);
+    ctx.ellipse(w * 0.62, baseY, 5, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+  },
   tree: (ctx, w, h) => drawIsoTree(ctx, w, h, '#6b4a28', '#3f8a4f', 'tree'),
   oak: (ctx, w, h) => drawIsoTree(ctx, w, h, '#5f4326', '#4d8a3a', 'oak'),
   willow: (ctx, w, h) => drawIsoTree(ctx, w, h, '#6b5a34', '#8aa84c', 'willow'),
@@ -622,6 +764,7 @@ const PROPS = {
 
 /** Height in pixels above the tile footprint for each prop. */
 const PROP_HEIGHTS = {
+  ladder_down: 44, ladder_up: 76, mine_entrance: 72, mine_cart: 40,
   tree: 110, oak: 116, willow: 104, stump: 34,
   rock_copper: 56, rock_tin: 56, rock_iron: 56, rock_coal: 56, rock_spent: 56,
   fish_spot: 34, bank: 62, counter: 58, furnace: 96, anvil: 56, range: 66,

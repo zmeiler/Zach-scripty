@@ -5,9 +5,15 @@
  * the server and the browser run. That keeps the download small and means the
  * client never has to be sent 9,216 tiles, while still guaranteeing both sides
  * agree on every wall and tree (verified with a checksum at login).
+ *
+ * The world is a stack of *planes*. Plane 0 is the surface; planes 1-3 are the
+ * mine that descends under Copper Hollow. Each plane owns its own tile array
+ * and its own object index, and every accessor in this module takes the plane
+ * as an optional last argument that defaults to the surface - so code that only
+ * ever cared about the overworld keeps working unchanged.
  */
 
-import { MAP_HEIGHT, MAP_WIDTH, TILE, BLOCKED_TILES } from './constants.js';
+import { MAP_HEIGHT, MAP_WIDTH, PLANE_COUNT, SURFACE, TILE, BLOCKED_TILES } from './constants.js';
 
 export const WORLD_SEED = 20240801;
 
@@ -71,15 +77,39 @@ export const OBJECT_TYPES = Object.freeze({
   range: { name: 'Cooking range', blocked: true, art: 'range', action: { id: 'cook', label: 'Cook on', verb: 'open' } },
   fountain: { name: 'Fountain', blocked: true, art: 'fountain', action: { id: 'drink', label: 'Drink from', verb: 'cup your hands in' } },
   signpost: { name: 'Signpost', blocked: true, art: 'sign', action: { id: 'read', label: 'Read', verb: 'squint at' } },
-  campfire: { name: 'Fire', blocked: true, art: 'fire', temporary: true, action: { id: 'cook', label: 'Cook on', verb: 'crouch beside' } }
+  campfire: { name: 'Fire', blocked: true, art: 'fire', temporary: true, action: { id: 'cook', label: 'Cook on', verb: 'crouch beside' } },
+
+  // ----------------------------------------------------------------- descent
+  // Every one of these carries a `link` on the *instance*: which plane and tile
+  // it delivers you to. The type only says what it looks like and what the menu
+  // entry reads.
+  mine_entrance: {
+    name: 'Mine entrance', blocked: false, height: 2, art: 'mine_entrance',
+    action: { id: 'climb', label: 'Climb down', verb: 'climb down into' }
+  },
+  ladder_down: {
+    name: 'Ladder', blocked: false, height: 2, art: 'ladder_down',
+    action: { id: 'climb', label: 'Climb down', verb: 'take hold of' }
+  },
+  ladder_up: {
+    name: 'Ladder', blocked: false, height: 2, art: 'ladder_up',
+    action: { id: 'climb', label: 'Climb up', verb: 'take hold of' }
+  },
+  mine_cart: {
+    name: 'Mine cart', blocked: true, art: 'mine_cart',
+    action: { id: 'read', label: 'Search', verb: 'rummage in' }
+  }
 });
 
 export const REGIONS = Object.freeze([
-  { id: 'village', name: 'Emberfall Village', x: 34, y: 40, w: 30, h: 26, music: 'calm' },
-  { id: 'woods', name: 'Whispering Woods', x: 22, y: 2, w: 54, h: 36, music: 'woods' },
-  { id: 'hollow', name: 'Copper Hollow', x: 2, y: 30, w: 30, h: 38, music: 'cave' },
-  { id: 'lake', name: 'Lake Serene', x: 64, y: 26, w: 30, h: 44, music: 'water' },
-  { id: 'meadow', name: 'Sunny Meadow', x: 22, y: 66, w: 52, h: 28, music: 'calm' }
+  { id: 'village', name: 'Emberfall Village', plane: 0, x: 34, y: 40, w: 30, h: 26, music: 'calm' },
+  { id: 'woods', name: 'Whispering Woods', plane: 0, x: 22, y: 2, w: 54, h: 36, music: 'woods' },
+  { id: 'hollow', name: 'Copper Hollow', plane: 0, x: 2, y: 30, w: 30, h: 38, music: 'cave' },
+  { id: 'lake', name: 'Lake Serene', plane: 0, x: 64, y: 26, w: 30, h: 44, music: 'water' },
+  { id: 'meadow', name: 'Sunny Meadow', plane: 0, x: 22, y: 66, w: 52, h: 28, music: 'calm' },
+  { id: 'mine_upper', name: 'Copper Hollow Mine', plane: 1, x: 0, y: 0, w: MAP_WIDTH, h: MAP_HEIGHT, music: 'cave' },
+  { id: 'mine_deep', name: 'The Deep Seam', plane: 2, x: 0, y: 0, w: MAP_WIDTH, h: MAP_HEIGHT, music: 'cave' },
+  { id: 'ember_chamber', name: 'The Ember Chamber', plane: 3, x: 0, y: 0, w: MAP_WIDTH, h: MAP_HEIGHT, music: 'cave' }
 ]);
 
 function idx(x, y) {
@@ -136,11 +166,33 @@ function road(tiles, x1, y1, x2, y2, width = 3, tile = TILE.PATH) {
 }
 
 /**
+ * One level of the world: its own tiles, its own objects, its own index.
+ *
+ * `dark` is how much of the plane is unlit, from 0 (broad daylight) to 1 (you
+ * see only what your own light reaches). `ambient` is the colour the renderer
+ * clears to, which is what makes a cave feel like a cave before a single tile
+ * is drawn.
+ */
+function makePlane(index, id, name, fill, { dark = 0, ambient = '#0a0f14' } = {}) {
+  return {
+    index,
+    id,
+    name,
+    tiles: new Uint8Array(MAP_WIDTH * MAP_HEIGHT).fill(fill),
+    objects: [],
+    objectAt: new Map(),
+    dark,
+    ambient
+  };
+}
+
+/**
  * Builds the full world. Pure function of the seed.
  */
 export function buildWorld(seed = WORLD_SEED) {
   const rng = makeRng(seed);
-  const tiles = new Uint8Array(MAP_WIDTH * MAP_HEIGHT).fill(TILE.GRASS);
+  const surface = makePlane(SURFACE, 'surface', 'Emberfall', TILE.GRASS);
+  const tiles = surface.tiles;
 
   // --- Terrain bands -------------------------------------------------------
   // Northern woods get a darker grass so the region reads at a glance.
@@ -201,38 +253,50 @@ export function buildWorld(seed = WORLD_SEED) {
     seed,
     width: MAP_WIDTH,
     height: MAP_HEIGHT,
+    planes: [surface],
+    allObjects: [],
+    // Surface aliases, so anything that only ever meant "the overworld" reads
+    // the way it always did.
     tiles,
+    objects: surface.objects,
+    objectAt: surface.objectAt,
     buildings: { bank, store, smithy, kitchen },
-    objects: [],
-    objectAt: new Map(),
     regions: REGIONS
   };
 
   placeObjects(world, rng);
+  buildMine(world, rng);
   world.checksum = checksumWorld(world);
   return world;
 }
 
-function tileFree(world, x, y) {
+/** The plane a coordinate belongs to, falling back to the surface. */
+export function planeAt(world, plane = SURFACE) {
+  return world.planes[plane] || world.planes[SURFACE];
+}
+
+function tileFree(world, x, y, plane = SURFACE) {
   if (x < 1 || y < 1 || x >= MAP_WIDTH - 1 || y >= MAP_HEIGHT - 1) return false;
-  if (world.objectAt.has(`${x},${y}`)) return false;
+  if (planeAt(world, plane).objectAt.has(`${x},${y}`)) return false;
   return true;
 }
 
-function addObject(world, type, x, y) {
-  if (!tileFree(world, x, y)) return null;
+function addObject(world, type, x, y, plane = SURFACE, extra = null) {
+  if (!tileFree(world, x, y, plane)) return null;
   const def = OBJECT_TYPES[type];
   if (!def) return null;
-  const tile = world.tiles[idx(x, y)];
+  const level = planeAt(world, plane);
+  const tile = level.tiles[idx(x, y)];
   const walkableTile = !BLOCKED_TILES.has(tile);
   if (def.water) {
     if (tile !== TILE.WATER) return null;
   } else if (!walkableTile) {
     return null;
   }
-  const obj = { id: `o${world.objects.length}`, type, x, y, depletedUntil: 0 };
-  world.objects.push(obj);
-  world.objectAt.set(`${x},${y}`, obj);
+  const obj = { id: `o${world.allObjects.length}`, type, x, y, plane, depletedUntil: 0, ...(extra || {}) };
+  level.objects.push(obj);
+  level.objectAt.set(`${x},${y}`, obj);
+  world.allObjects.push(obj);
   return obj;
 }
 
@@ -242,6 +306,10 @@ function nearRoad(x, y) {
 
 function placeObjects(world, rng) {
   const { tiles } = world;
+
+  // The mine mouth is claimed before the ore scatter, so a randomly placed rock
+  // can never sit on the one tile that has to stay clear.
+  world.mineEntrance = addObject(world, 'mine_entrance', 10, 50);
 
   // Whispering Woods: ordinary trees everywhere, oaks in clusters, willows by
   // the northern lake shore.
@@ -323,18 +391,240 @@ function placeObjects(world, rng) {
   addObject(world, 'signpost', 62, 51);
 }
 
+// ------------------------------------------------------------------- the mine
+
+/**
+ * Three levels under Copper Hollow, hand-laid rather than randomly generated.
+ *
+ * A random cave is a maze; a designed one is a place. Every room here has a
+ * reason to exist - an ore face, a junction, a chamber to fight in - and the
+ * corridors between them are short enough that you always know roughly which
+ * way is back to the ladder.
+ *
+ * Rooms are addressed by name so the ladders, ore and (later) creatures can all
+ * refer to the same spot without repeating coordinates.
+ */
+const MINE_LEVELS = [
+  {
+    plane: 1,
+    id: 'mine_upper',
+    floor: TILE.CAVE,
+    wall: TILE.ROCKFACE,
+    rubble: TILE.GRAVEL,
+    dark: 0.55,
+    ambient: '#0b0906',
+    rooms: {
+      landing: { x: 40, y: 44, w: 9, h: 8 },
+      copper: { x: 24, y: 42, w: 12, h: 10 },
+      tin: { x: 26, y: 26, w: 11, h: 9 },
+      gallery: { x: 42, y: 26, w: 10, h: 10 },
+      iron: { x: 12, y: 34, w: 10, h: 10 },
+      coal: { x: 14, y: 54, w: 12, h: 10 },
+      hollow: { x: 30, y: 58, w: 12, h: 9 },
+      descent: { x: 46, y: 58, w: 9, h: 8 }
+    },
+    corridors: [
+      ['landing', 'copper'], ['copper', 'tin'], ['tin', 'gallery'], ['gallery', 'landing'],
+      ['copper', 'iron'], ['iron', 'coal'], ['coal', 'hollow'], ['hollow', 'descent'],
+      ['landing', 'descent']
+    ],
+    ore: [
+      { room: 'copper', types: ['copper_rock', 'copper_rock', 'tin_rock'], count: 10 },
+      { room: 'tin', types: ['tin_rock', 'tin_rock', 'copper_rock'], count: 9 },
+      { room: 'gallery', types: ['iron_rock', 'copper_rock'], count: 7 },
+      { room: 'iron', types: ['iron_rock', 'iron_rock', 'coal_rock'], count: 10 },
+      { room: 'coal', types: ['coal_rock', 'coal_rock', 'iron_rock'], count: 11 },
+      { room: 'hollow', types: ['coal_rock', 'iron_rock'], count: 6 }
+    ]
+  },
+  {
+    plane: 2,
+    id: 'mine_deep',
+    floor: TILE.MINE_FLOOR,
+    wall: TILE.MINE_WALL,
+    rubble: TILE.GRAVEL,
+    dark: 0.78,
+    ambient: '#05070b',
+    rooms: {
+      landing: { x: 46, y: 58, w: 9, h: 8 },
+      crossing: { x: 30, y: 56, w: 12, h: 10 },
+      seam: { x: 14, y: 52, w: 12, h: 11 },
+      fungus: { x: 16, y: 30, w: 13, h: 12 },
+      hall: { x: 34, y: 34, w: 14, h: 12 },
+      coalface: { x: 50, y: 24, w: 12, h: 12 },
+      vault: { x: 52, y: 42, w: 10, h: 10 },
+      descent: { x: 34, y: 18, w: 9, h: 8 }
+    },
+    corridors: [
+      ['landing', 'crossing'], ['crossing', 'seam'], ['seam', 'fungus'], ['fungus', 'hall'],
+      ['hall', 'crossing'], ['hall', 'coalface'], ['coalface', 'vault'], ['vault', 'landing'],
+      ['coalface', 'descent'], ['fungus', 'descent']
+    ],
+    ore: [
+      { room: 'seam', types: ['coal_rock', 'iron_rock'], count: 12 },
+      { room: 'coalface', types: ['coal_rock', 'coal_rock', 'iron_rock'], count: 13 },
+      { room: 'hall', types: ['iron_rock', 'coal_rock'], count: 8 },
+      { room: 'vault', types: ['coal_rock'], count: 6 }
+    ]
+  },
+  {
+    plane: 3,
+    id: 'ember_chamber',
+    floor: TILE.EMBER,
+    wall: TILE.CRYSTAL,
+    rubble: TILE.MINE_FLOOR,
+    dark: 0.45,
+    ambient: '#120604',
+    rooms: {
+      landing: { x: 34, y: 18, w: 9, h: 8 },
+      approach: { x: 35, y: 30, w: 8, h: 10 },
+      hall: { x: 26, y: 46, w: 26, h: 22 }
+    },
+    corridors: [['landing', 'approach'], ['approach', 'hall']],
+    ore: []
+  }
+];
+
+function roomCentre(room) {
+  return { x: room.x + Math.floor(room.w / 2), y: room.y + Math.floor(room.h / 2) };
+}
+
+/** L-shaped tunnel between two points: along x, then along y. */
+function corridor(tiles, ax, ay, bx, by, tile, width = 2) {
+  const half = Math.floor(width / 2);
+  const x0 = Math.min(ax, bx);
+  const x1 = Math.max(ax, bx);
+  const y0 = Math.min(ay, by);
+  const y1 = Math.max(ay, by);
+  fillRect(tiles, x0, ay - half, x1 - x0 + 1, width, tile);
+  fillRect(tiles, bx - half, y0, width, y1 - y0 + 1, tile);
+}
+
+/**
+ * Anything carved gets a wall around it. The rest of the plane stays VOID,
+ * which the renderer draws as nothing at all - so a mine level reads as a
+ * lit island of rock in the dark rather than a rectangle with a border.
+ */
+function encloseCarved(level, wall) {
+  const { tiles } = level;
+  // Decided from a snapshot and applied afterwards: writing walls as we scan
+  // would let each new wall seed the next, and the whole plane fills in.
+  const ring = [];
+  for (let y = 1; y < MAP_HEIGHT - 1; y += 1) {
+    for (let x = 1; x < MAP_WIDTH - 1; x += 1) {
+      if (tiles[idx(x, y)] !== TILE.VOID) continue;
+      let touchesFloor = false;
+      for (let dy = -1; dy <= 1 && !touchesFloor; dy += 1) {
+        for (let dx = -1; dx <= 1; dx += 1) {
+          if (tiles[idx(x + dx, y + dy)] !== TILE.VOID) {
+            touchesFloor = true;
+            break;
+          }
+        }
+      }
+      if (touchesFloor) ring.push(idx(x, y));
+    }
+  }
+  for (const i of ring) tiles[i] = wall;
+}
+
+function buildMine(world, rng) {
+  const built = [];
+
+  for (const spec of MINE_LEVELS) {
+    const level = makePlane(spec.plane, spec.id, regionName(spec.id), TILE.VOID, {
+      dark: spec.dark,
+      ambient: spec.ambient
+    });
+    world.planes[spec.plane] = level;
+
+    for (const room of Object.values(spec.rooms)) {
+      fillRect(level.tiles, room.x, room.y, room.w, room.h, spec.floor);
+    }
+    for (const [from, to] of spec.corridors) {
+      const a = roomCentre(spec.rooms[from]);
+      const b = roomCentre(spec.rooms[to]);
+      corridor(level.tiles, a.x, a.y, b.x, b.y, spec.floor, spec.plane === 3 ? 3 : 2);
+    }
+    // A scatter of loose stone, so the floor is not one flat colour.
+    for (let i = 0; i < 260; i += 1) {
+      const x = 1 + Math.floor(rng() * (MAP_WIDTH - 2));
+      const y = 1 + Math.floor(rng() * (MAP_HEIGHT - 2));
+      if (level.tiles[idx(x, y)] === spec.floor && rng() < 0.5) level.tiles[idx(x, y)] = spec.rubble;
+    }
+    encloseCarved(level, spec.wall);
+    built.push({ spec, level });
+  }
+
+  // Ore faces, placed room by room so each gallery has its own character.
+  for (const { spec } of built) {
+    for (const patch of spec.ore) {
+      const room = spec.rooms[patch.room];
+      let placed = 0;
+      for (let i = 0; i < patch.count * 6 && placed < patch.count; i += 1) {
+        const x = room.x + Math.floor(rng() * room.w);
+        const y = room.y + Math.floor(rng() * room.h);
+        const type = patch.types[Math.floor(rng() * patch.types.length)];
+        if (addObject(world, type, x, y, spec.plane)) placed += 1;
+      }
+    }
+  }
+
+  // --- Stitching the levels together --------------------------------------
+  // Each pair of ladders points at the other's tile, so climbing either way
+  // leaves you standing at the foot of the one you would use to go back.
+  const surfaceEntrance = world.mineEntrance;
+  const landings = built.map(({ spec }) => ({ spec, at: roomCentre(spec.rooms.landing) }));
+  const descents = built
+    .filter(({ spec }) => spec.rooms.descent)
+    .map(({ spec }) => ({ spec, at: roomCentre(spec.rooms.descent) }));
+
+  // Surface -> level 1.
+  const firstLanding = landings[0];
+  const upFromOne = addObject(world, 'ladder_up', firstLanding.at.x, firstLanding.at.y, 1, {
+    link: { plane: SURFACE, x: surfaceEntrance.x, y: surfaceEntrance.y }
+  });
+  surfaceEntrance.link = { plane: 1, x: upFromOne.x, y: upFromOne.y };
+
+  // Level n -> level n+1.
+  for (const descent of descents) {
+    const below = landings.find((entry) => entry.spec.plane === descent.spec.plane + 1);
+    if (!below) continue;
+    const up = addObject(world, 'ladder_up', below.at.x, below.at.y, below.spec.plane, {
+      link: { plane: descent.spec.plane, x: descent.at.x, y: descent.at.y }
+    });
+    addObject(world, 'ladder_down', descent.at.x, descent.at.y, descent.spec.plane, {
+      link: { plane: below.spec.plane, x: up.x, y: up.y }
+    });
+  }
+
+  // A little dressing so the galleries look worked rather than found.
+  for (const { spec } of built) {
+    for (const room of Object.values(spec.rooms)) {
+      if (rng() < 0.45) addObject(world, 'mine_cart', room.x + 1, room.y + 1, spec.plane);
+    }
+  }
+}
+
+function regionName(id) {
+  const region = REGIONS.find((entry) => entry.id === id);
+  return region ? region.name : 'The Deep';
+}
+
 /**
  * Order-independent-ish checksum used to prove client and server generated the
  * same map. Cheap, and good enough to catch a stale cached build.
  */
 export function checksumWorld(world) {
   let h = 2166136261 >>> 0;
-  for (let i = 0; i < world.tiles.length; i += 1) {
-    h ^= world.tiles[i];
-    h = Math.imul(h, 16777619) >>> 0;
+  for (const level of world.planes) {
+    for (let i = 0; i < level.tiles.length; i += 1) {
+      h ^= level.tiles[i];
+      h = Math.imul(h, 16777619) >>> 0;
+    }
   }
-  for (const obj of world.objects) {
-    for (const ch of `${obj.type}:${obj.x}:${obj.y};`) {
+  for (const obj of world.allObjects) {
+    for (const ch of `${obj.type}:${obj.plane}:${obj.x}:${obj.y};`) {
       h ^= ch.charCodeAt(0);
       h = Math.imul(h, 16777619) >>> 0;
     }
@@ -342,20 +632,20 @@ export function checksumWorld(world) {
   return h >>> 0;
 }
 
-export function tileAt(world, x, y) {
+export function tileAt(world, x, y, plane = SURFACE) {
   if (x < 0 || y < 0 || x >= world.width || y >= world.height) return TILE.WALL;
-  return world.tiles[y * world.width + x];
+  return planeAt(world, plane).tiles[y * world.width + x];
 }
 
-export function objectAt(world, x, y) {
-  return world.objectAt.get(`${x},${y}`) || null;
+export function objectAt(world, x, y, plane = SURFACE) {
+  return planeAt(world, plane).objectAt.get(`${x},${y}`) || null;
 }
 
 /** True when a character may stand on this tile right now. */
-export function isWalkable(world, x, y) {
-  const tile = tileAt(world, x, y);
+export function isWalkable(world, x, y, plane = SURFACE) {
+  const tile = tileAt(world, x, y, plane);
   if (BLOCKED_TILES.has(tile)) return false;
-  const obj = objectAt(world, x, y);
+  const obj = objectAt(world, x, y, plane);
   if (obj) {
     // Stumps and spent rock faces still occupy their tile, so blocking does not
     // depend on whether the resource is currently depleted.
@@ -365,9 +655,16 @@ export function isWalkable(world, x, y) {
   return true;
 }
 
-export function regionAt(world, x, y) {
+export function regionAt(world, x, y, plane = SURFACE) {
   for (const region of world.regions) {
+    if ((region.plane ?? SURFACE) !== plane) continue;
     if (x >= region.x && x < region.x + region.w && y >= region.y && y < region.y + region.h) return region;
   }
+  if (plane !== SURFACE) return { id: 'deep', name: planeAt(world, plane).name, music: 'cave' };
   return { id: 'wilds', name: 'The Outskirts', music: 'calm' };
+}
+
+/** How dark a plane is, 0 (daylight) to 1 (only your own light reaches). */
+export function planeDarkness(world, plane = SURFACE) {
+  return planeAt(world, plane).dark || 0;
 }

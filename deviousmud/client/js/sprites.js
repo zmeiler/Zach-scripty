@@ -141,6 +141,48 @@ const TILE_PAINTERS = {
     ctx.fillStyle = '#4b463f';
     ctx.fillRect(2, 2, w - 6, h - 8);
     speckle(ctx, w, h, ['#57514a', '#332f2a'], 0.3, v + 19);
+  },
+
+  // ----------------------------------------------------------- underground
+  // The three mine levels each get their own floor and wall so that a glance
+  // at the screen tells you how deep you are.
+  [TILE.MINE_FLOOR]: (ctx, w, h, v) => {
+    ctx.fillStyle = '#443f3d';
+    ctx.fillRect(0, 0, w, h);
+    speckle(ctx, w, h, ['#4d4744', '#3b3634', '#544c47'], 0.34, v + 23);
+  },
+  [TILE.MINE_WALL]: (ctx, w, h, v) => {
+    ctx.fillStyle = '#2b2724';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#37322e';
+    ctx.fillRect(2, 2, w - 6, h - 8);
+    speckle(ctx, w, h, ['#413a35', '#221f1c'], 0.28, v + 29);
+  },
+  [TILE.EMBER]: (ctx, w, h, v) => {
+    ctx.fillStyle = '#4a2a22';
+    ctx.fillRect(0, 0, w, h);
+    speckle(ctx, w, h, ['#5c3428', '#3d221c', '#6b3c2b'], 0.3, v + 31);
+    // A few coals still glowing under the crust.
+    for (let i = 0; i < 2; i += 1) {
+      const x = Math.floor(noise2(i, v, 41) * (w - 4)) + 2;
+      const y = Math.floor(noise2(v, i, 43) * (h - 4)) + 2;
+      ctx.fillStyle = i === 0 ? '#e2703a' : '#f0a44c';
+      ctx.fillRect(x, y, 2, 2);
+    }
+  },
+  [TILE.CRYSTAL]: (ctx, w, h, v) => {
+    ctx.fillStyle = '#2a1d2e';
+    ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = '#3a2a40';
+    ctx.fillRect(2, 2, w - 6, h - 8);
+    ctx.fillStyle = 'rgba(190,140,255,0.35)';
+    ctx.fillRect(w * 0.3, h * 0.2, 3, h * 0.5);
+    speckle(ctx, w, h, ['#4a3654', '#241a28'], 0.24, v + 37);
+  },
+  // Solid rock nobody has dug into. Drawn as nothing, so the mine reads as an
+  // island of worked stone rather than a rectangle with a border.
+  [TILE.VOID]: (ctx, w, h) => {
+    ctx.clearRect(0, 0, w, h);
   }
 };
 
@@ -152,6 +194,34 @@ export function tileSprite(tile, variant, size) {
 // ----------------------------------------------------------------- objects
 
 const OBJECT_PAINTERS = {
+  ladder_down: (ctx, w, h) => drawLadder(ctx, w, h, 'down'),
+  ladder_up: (ctx, w, h) => drawLadder(ctx, w, h, 'up'),
+  mine_entrance: (ctx, w, h) => {
+    // A timbered mouth in the rock, with the dark of the shaft behind it.
+    ctx.fillStyle = '#17120f';
+    ctx.beginPath();
+    ctx.moveTo(w * 0.18, h * 0.92);
+    ctx.lineTo(w * 0.18, h * 0.46);
+    ctx.quadraticCurveTo(w * 0.5, h * 0.2, w * 0.82, h * 0.46);
+    ctx.lineTo(w * 0.82, h * 0.92);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#7a5a32';
+    ctx.fillRect(w * 0.12, h * 0.44, w * 0.1, h * 0.5);
+    ctx.fillRect(w * 0.78, h * 0.44, w * 0.1, h * 0.5);
+    ctx.fillRect(w * 0.12, h * 0.36, w * 0.76, h * 0.1);
+  },
+  mine_cart: (ctx, w, h) => {
+    ctx.fillStyle = '#5a5148';
+    ctx.fillRect(w * 0.18, h * 0.42, w * 0.64, h * 0.34);
+    ctx.fillStyle = '#3b352f';
+    ctx.fillRect(w * 0.22, h * 0.46, w * 0.56, h * 0.12);
+    ctx.fillStyle = '#2a2622';
+    ctx.beginPath();
+    ctx.arc(w * 0.32, h * 0.8, w * 0.09, 0, Math.PI * 2);
+    ctx.arc(w * 0.68, h * 0.8, w * 0.09, 0, Math.PI * 2);
+    ctx.fill();
+  },
   tree: (ctx, w, h) => drawTree(ctx, w, h, '#2f6d3f', '#3f8a4f'),
   oak: (ctx, w, h) => drawTree(ctx, w, h, '#3a6b2c', '#4d8a3a'),
   willow: (ctx, w, h) => drawTree(ctx, w, h, '#6d8a3a', '#8aa84c', true),
@@ -289,6 +359,45 @@ function drawTree(ctx, w, h, dark, light, droopy = false) {
   }
 }
 
+/** A ladder, drawn tall so it reads as something you climb rather than step over. */
+function drawLadder(ctx, w, h, direction) {
+  const x0 = w * 0.3;
+  const x1 = w * 0.7;
+  const top = h * 0.12;
+  const bottom = h * 0.92;
+  ctx.strokeStyle = '#7a5a32';
+  ctx.lineWidth = Math.max(2, w * 0.07);
+  ctx.beginPath();
+  ctx.moveTo(x0, top);
+  ctx.lineTo(x0, bottom);
+  ctx.moveTo(x1, top);
+  ctx.lineTo(x1, bottom);
+  ctx.stroke();
+  ctx.strokeStyle = '#9a7642';
+  ctx.lineWidth = Math.max(1, w * 0.05);
+  for (let i = 0; i <= 5; i += 1) {
+    const y = top + ((bottom - top) * i) / 5;
+    ctx.beginPath();
+    ctx.moveTo(x0, y);
+    ctx.lineTo(x1, y);
+    ctx.stroke();
+  }
+  // An arrow at the end you would be heading towards.
+  ctx.fillStyle = '#f2c14e';
+  ctx.beginPath();
+  if (direction === 'down') {
+    ctx.moveTo(w * 0.5, bottom);
+    ctx.lineTo(w * 0.4, bottom - h * 0.1);
+    ctx.lineTo(w * 0.6, bottom - h * 0.1);
+  } else {
+    ctx.moveTo(w * 0.5, top);
+    ctx.lineTo(w * 0.4, top + h * 0.1);
+    ctx.lineTo(w * 0.6, top + h * 0.1);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
 function drawRock(ctx, w, h, oreColour) {
   ctx.fillStyle = '#6d675e';
   ctx.beginPath();
@@ -311,7 +420,8 @@ function drawRock(ctx, w, h, oreColour) {
 
 export function objectSprite(art, size) {
   const painter = OBJECT_PAINTERS[art] || OBJECT_PAINTERS.stump;
-  const height = art === 'tree' || art === 'oak' || art === 'willow' || art === 'furnace' ? size * 2 : size;
+  const TALL = ['tree', 'oak', 'willow', 'furnace', 'ladder_up', 'ladder_down', 'mine_entrance'];
+  const height = TALL.includes(art) ? size * 2 : size;
   return cached(`obj:${art}:${size}`, size, height, (ctx, w, h) => painter(ctx, w, h));
 }
 

@@ -27,27 +27,31 @@ function heuristic(x1, y1, x2, y2) {
   return 10 * (dx + dy) - 6 * Math.min(dx, dy);
 }
 
-function canStep(world, x, y, dx, dy, blocked) {
+function canStep(world, x, y, dx, dy, blocked, plane) {
   const nx = x + dx;
   const ny = y + dy;
-  if (!isWalkable(world, nx, ny) || blocked(nx, ny)) return false;
+  if (!isWalkable(world, nx, ny, plane) || blocked(nx, ny)) return false;
   if (dx !== 0 && dy !== 0) {
-    if (!isWalkable(world, x + dx, y) || blocked(x + dx, y)) return false;
-    if (!isWalkable(world, x, y + dy) || blocked(x, y + dy)) return false;
+    if (!isWalkable(world, x + dx, y, plane) || blocked(x + dx, y)) return false;
+    if (!isWalkable(world, x, y + dy, plane) || blocked(x, y + dy)) return false;
   }
   return true;
 }
 
 /**
- * Finds a path from (sx,sy) to (tx,ty).
+ * Finds a path from (sx,sy) to (tx,ty) on one plane. There is no route between
+ * planes: a ladder is an action, not a step, so the search never leaves the
+ * level it started on.
  *
  * @param {object} opts.blocked   extra "is this tile occupied" predicate
  * @param {number} opts.range     stop as soon as we are within this many tiles
+ * @param {number} opts.plane     which level of the world to search
  * @returns {Array<{x:number,y:number}>} steps excluding the start tile
  */
 export function findPath(world, sx, sy, tx, ty, opts = {}) {
   const blocked = opts.blocked || (() => false);
   const range = opts.range ?? 0;
+  const plane = opts.plane ?? 0;
   if (sx === tx && sy === ty) return [];
 
   const withinGoal = (x, y) => Math.max(Math.abs(x - tx), Math.abs(y - ty)) <= range;
@@ -79,7 +83,7 @@ export function findPath(world, sx, sy, tx, ty, opts = {}) {
     if (withinGoal(current.x, current.y)) return reconstruct(cameFrom, current);
 
     for (const dir of DIRS) {
-      if (!canStep(world, current.x, current.y, dir.dx, dir.dy, blocked)) continue;
+      if (!canStep(world, current.x, current.y, dir.dx, dir.dy, blocked, plane)) continue;
       const nx = current.x + dir.dx;
       const ny = current.y + dir.dy;
       const key = nx * 10000 + ny;

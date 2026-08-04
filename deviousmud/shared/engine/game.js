@@ -10,6 +10,8 @@
 import {
   BANK_SIZE,
   COMBAT_TIMEOUT_TICKS,
+  PLANE_COUNT,
+  SURFACE,
   HP_REGEN_TICKS,
   INVENTORY_SIZE,
   LOOT_DESPAWN_TICKS,
@@ -29,7 +31,7 @@ import { SHOPS, shopDef, shopAccepts } from '../shops.js';
 import { COOKING, SMELTING, SMITHING, burnChance, smeltingRecipe, smithingRecipe } from '../crafting.js';
 import { NPC_SPAWNS, npcDef } from '../npcs.js';
 import { QUESTS, QUEST_IDS, questDef } from '../quests.js';
-import { OBJECT_TYPES, buildWorld, isWalkable, objectAt, regionAt, tileAt } from '../world.js';
+import { OBJECT_TYPES, buildWorld, isWalkable, objectAt, planeAt, regionAt, tileAt } from '../world.js';
 import { createSkillSet, combatLevel, levelForXp, totalLevel } from '../skills.js';
 import { sanitizeAppearance } from '../appearance.js';
 import { chebyshev, findPath, isAdjacent } from './pathfinding.js';
@@ -114,10 +116,11 @@ export class Game {
     this.outbox.push({ to: playerId, msg: { t: type, ...data } });
   }
 
-  /** Everyone who can see (x, y) gets the message. */
-  broadcastNear(x, y, type, data = {}, exclude = null) {
+  /** Everyone who can see (x, y) on that plane gets the message. */
+  broadcastNear(x, y, plane, type, data = {}, exclude = null) {
     for (const player of this.players.values()) {
       if (player.id === exclude) continue;
+      if (player.plane !== plane) continue;
       if (chebyshev(player.x, player.y, x, y) > VIEW_RADIUS + 2) continue;
       this.send(player.id, type, data);
     }
@@ -144,8 +147,9 @@ export class Game {
       const def = npcDef(spawn.type);
       if (!def) continue;
       let { x, y } = spawn;
-      if (!isWalkable(this.world, x, y)) {
-        const nearby = this.findFreeTileNear(x, y, 6);
+      const plane = spawn.plane ?? SURFACE;
+      if (!isWalkable(this.world, x, y, plane)) {
+        const nearby = this.findFreeTileNear(x, y, 6, plane);
         if (!nearby) continue;
         x = nearby.x;
         y = nearby.y;
@@ -159,6 +163,7 @@ export class Game {
         name: def.name,
         x,
         y,
+        plane,
         spawnX: x,
         spawnY: y,
         area: spawn.area,
@@ -184,14 +189,14 @@ export class Game {
     }
   }
 
-  findFreeTileNear(x, y, radius = 4) {
+  findFreeTileNear(x, y, radius = 4, plane = SURFACE) {
     for (let r = 0; r <= radius; r += 1) {
       for (let dy = -r; dy <= r; dy += 1) {
         for (let dx = -r; dx <= r; dx += 1) {
           if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
           const nx = x + dx;
           const ny = y + dy;
-          if (isWalkable(this.world, nx, ny)) return { x: nx, y: ny };
+          if (isWalkable(this.world, nx, ny, plane)) return { x: nx, y: ny };
         }
       }
     }
@@ -210,6 +215,7 @@ export class Game {
       appearance: sanitizeAppearance(save ? save.appearance : profile.appearance),
       x: save ? save.x ?? SPAWN_POINT.x : SPAWN_POINT.x,
       y: save ? save.y ?? SPAWN_POINT.y : SPAWN_POINT.y,
+      plane: save ? clampPlane(save.plane) : SURFACE,
       dir: 'south',
       path: [],
       skills: createSkillSet(),
@@ -241,15 +247,24 @@ export class Game {
     if (save) this.applySave(player, save);
     else for (const entry of STARTER_KIT) addItem(player.inventory, entry.id, entry.count);
 
-    if (!isWalkable(this.world, player.x, player.y)) {
-      const free = this.findFreeTileNear(SPAWN_POINT.x, SPAWN_POINT.y, 8) || SPAWN_POINT;
-      player.x = free.x;
-      player.y = free.y;
+    if (!isWalkable(this.world, player.x, player.y, player.plane)) {
+      const free = this.findFreeTileNear(player.x, player.y, 8, player.plane);
+      if (free) {
+        player.x = free.x;
+        player.y = free.y;
+      } else {
+        // Nowhere sensible on that plane any more (a changed map, an edited
+        // save): put them back by the fountain rather than inside a wall.
+        player.plane = SURFACE;
+        const surface = this.findFreeTileNear(SPAWN_POINT.x, SPAWN_POINT.y, 8, SURFACE) || SPAWN_POINT;
+        player.x = surface.x;
+        player.y = surface.y;
+      }
     }
 
     this.players.set(id, player);
     this.sendFullState(player);
-    this.broadcastNear(player.x, player.y, 'msg', { text: `${player.name} has joined Emberfall.`, channel: 'system' }, id);
+    this.broadcastNear(player.x, player.y, player.plane, 'msg', { text: `${player.name} has joined Emberfall.`, channel: 'system' }, id);
     return player;
   }
 
@@ -258,7 +273,7 @@ export class Game {
     if (!player) return null;
     if (player.trade) this.cancelTrade(player, 'Your trading partner left.');
     this.players.delete(id);
-    this.broadcastNear(player.x, player.y, 'msg', { text: `${player.name} has left Emberfall.`, channel: 'system' }, id);
+    this.broadcastNear(player.x, player.y, player.plane, 'msg', { text: `${player.name} has left Emberfall.`, channel: 'system' }, id);
     return this.serializePlayer(player);
   }
 
@@ -268,6 +283,7 @@ export class Game {
       appearance: player.appearance,
       x: player.x,
       y: player.y,
+      plane: player.plane,
       hp: player.hp,
       energy: Math.round(player.energy),
       attackStyle: player.attackStyle,
@@ -354,7 +370,7 @@ export class Game {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     if (x < 0 || y < 0 || x >= this.world.width || y >= this.world.height) return;
     this.clearActivity(player);
-    player.path = findPath(this.world, player.x, player.y, x, y);
+    player.path = findPath(this.world, player.x, player.y, x, y, { plane: player.plane });
     if (player.path.length === 0 && !(player.x === x && player.y === y)) {
       this.message(player.id, 'You cannot reach that.');
     }
@@ -366,24 +382,28 @@ export class Game {
     const action = msg.action ? String(msg.action) : null;
     this.clearActivity(player);
 
+    // A stale click from before a ladder, or a client trying its luck: nothing
+    // on another level is ever a legal target.
+    const sameLevel = (thing) => thing && (thing.plane ?? SURFACE) === player.plane;
+
     if (kind === 'npc') {
       const npc = this.npcs.get(id);
-      if (!npc || npc.dead) return;
+      if (!npc || npc.dead || !sameLevel(npc)) return;
       player.pending = { kind: 'npc', id, action: action || (npc.def.friendly ? 'talk' : 'attack'), range: 1 };
       this.pathToward(player, npc.x, npc.y, 1);
     } else if (kind === 'object') {
       const obj = this.objectById(id);
-      if (!obj) return;
+      if (!sameLevel(obj)) return;
       player.pending = { kind: 'object', id, action, range: 1 };
       this.pathToward(player, obj.x, obj.y, 1);
     } else if (kind === 'player') {
       const other = this.players.get(id);
-      if (!other || other.id === player.id) return;
+      if (!other || other.id === player.id || !sameLevel(other)) return;
       player.pending = { kind: 'player', id, action: action || 'follow', range: 1 };
       this.pathToward(player, other.x, other.y, 1);
     } else if (kind === 'ground_item') {
       const item = this.groundItems.get(id);
-      if (!item) return;
+      if (!sameLevel(item)) return;
       player.pending = { kind: 'ground_item', id, action: 'take', range: 0 };
       this.pathToward(player, item.x, item.y, 0);
     }
@@ -394,7 +414,7 @@ export class Game {
       player.path = [];
       return;
     }
-    player.path = findPath(this.world, player.x, player.y, x, y, { range });
+    player.path = findPath(this.world, player.x, player.y, x, y, { range, plane: player.plane });
     if (player.path.length === 0) this.message(player.id, 'You cannot reach that.');
   }
 
@@ -403,7 +423,7 @@ export class Game {
     if (!raw) return;
     const text = filterChat(raw);
     player.chat = { text, ticks: CHAT_TICKS };
-    this.broadcastNear(player.x, player.y, 'chat', { id: player.id, name: player.name, text });
+    this.broadcastNear(player.x, player.y, player.plane, 'chat', { id: player.id, name: player.name, text });
   }
 
   cmdEmote(player, msg) {
@@ -541,12 +561,12 @@ export class Game {
       this.message(player.id, `You need firemaking level ${recipe.level} to light those.`);
       return;
     }
-    if (objectAt(this.world, player.x, player.y) || tileAt(this.world, player.x, player.y) === TILE.WATER) {
+    if (objectAt(this.world, player.x, player.y, player.plane) || tileAt(this.world, player.x, player.y, player.plane) === TILE.WATER) {
       this.message(player.id, 'You cannot light a fire here.');
       return;
     }
     removeSlot(player.inventory, slot, 1);
-    this.addDynamicObject('campfire', player.x, player.y, CAMPFIRE_TICKS);
+    this.addDynamicObject('campfire', player.x, player.y, player.plane, CAMPFIRE_TICKS);
     this.awardXp(player, 'firemaking', recipe.xp);
     player.anim = { kind: 'light', until: this.tickCount + 3 };
     this.message(player.id, 'The fire catches and the logs begin to burn.');
@@ -554,7 +574,7 @@ export class Game {
     this.sendInventory(player);
     this.checkQuests(player);
     // Step aside so the player is not standing in their own campfire.
-    const free = this.findFreeTileNear(player.x, player.y, 2);
+    const free = this.findFreeTileNear(player.x, player.y, 2, player.plane);
     if (free) {
       player.x = free.x;
       player.y = free.y;
@@ -572,14 +592,14 @@ export class Game {
     const amount = count === 'all' ? entry.count : Math.max(1, Math.min(entry.count, Math.floor(Number(count) || 1)));
     const removed = removeSlot(player.inventory, slot, amount);
     if (!removed) return;
-    this.spawnGroundItem(removed.id, removed.count, player.x, player.y, player.id);
+    this.spawnGroundItem(removed.id, removed.count, player.x, player.y, player.plane, player.id);
     this.message(player.id, `You drop the ${itemName(removed.id).toLowerCase()}.`);
     this.sendInventory(player);
   }
 
-  spawnGroundItem(itemId, count, x, y, ownerId = null) {
+  spawnGroundItem(itemId, count, x, y, plane = SURFACE, ownerId = null) {
     const id = this.uid('g');
-    const item = { id, itemId, count, x, y, owner: ownerId, droppedAt: this.tickCount };
+    const item = { id, itemId, count, x, y, plane, owner: ownerId, droppedAt: this.tickCount };
     this.groundItems.set(id, item);
     return item;
   }
@@ -607,20 +627,21 @@ export class Game {
 
   objectById(id) {
     if (this.dynamicObjects.has(id)) return this.dynamicObjects.get(id);
-    return this.world.objects.find((obj) => obj.id === id) || null;
+    return this.world.allObjects.find((obj) => obj.id === id) || null;
   }
 
-  addDynamicObject(type, x, y, lifetime) {
+  addDynamicObject(type, x, y, plane, lifetime) {
     const id = this.uid('d');
-    const obj = { id, type, x, y, expires: this.tickCount + lifetime, dynamic: true, depletedUntil: 0 };
+    const obj = { id, type, x, y, plane, expires: this.tickCount + lifetime, dynamic: true, depletedUntil: 0 };
     this.dynamicObjects.set(id, obj);
-    this.world.objectAt.set(`${x},${y}`, obj);
+    planeAt(this.world, plane).objectAt.set(`${x},${y}`, obj);
     return obj;
   }
 
   removeDynamicObject(obj) {
     this.dynamicObjects.delete(obj.id);
-    if (this.world.objectAt.get(`${obj.x},${obj.y}`) === obj) this.world.objectAt.delete(`${obj.x},${obj.y}`);
+    const index = planeAt(this.world, obj.plane).objectAt;
+    if (index.get(`${obj.x},${obj.y}`) === obj) index.delete(`${obj.x},${obj.y}`);
   }
 
   /** Runs the moment a player reaches whatever they clicked on. */
@@ -695,6 +716,9 @@ export class Game {
         player.hp = Math.min(this.maxHp(player), player.hp + 2);
         this.message(player.id, 'You drink the cool spring water. Refreshing.');
         break;
+      case 'climb':
+        this.climb(player, obj);
+        break;
       case 'read':
         this.message(player.id, this.signText(obj));
         break;
@@ -703,7 +727,69 @@ export class Game {
     }
   }
 
+  /**
+   * Moves a player between planes. A ladder is a single, instant step - there
+   * is no partial state to get stuck in - but everything that was watching the
+   * player has to be told, because from every other player's point of view they
+   * simply vanished.
+   */
+  climb(player, obj) {
+    const link = obj.link;
+    if (!link) {
+      this.message(player.id, 'It does not lead anywhere.');
+      return;
+    }
+    const destination = planeAt(this.world, link.plane);
+    const spot = isWalkable(this.world, link.x, link.y, link.plane)
+      ? { x: link.x, y: link.y }
+      : this.findFreeTileNear(link.x, link.y, 4, link.plane);
+    if (!spot) {
+      this.message(player.id, 'Something is blocking the way.');
+      return;
+    }
+
+    const fromX = player.x;
+    const fromY = player.y;
+    const fromPlane = player.plane;
+    const going = link.plane > fromPlane ? 'down' : 'up';
+
+    this.clearActivity(player);
+    if (player.trade) this.cancelTrade(player, 'You cannot trade from different levels.');
+    player.path = [];
+    player.x = spot.x;
+    player.y = spot.y;
+    player.plane = link.plane;
+    // Nobody on the new level has seen this player's kit yet, and nobody on the
+    // old one should keep a stale copy of it.
+    player.seen.clear();
+    for (const other of this.players.values()) other.seen.delete(player.id);
+    for (const npc of this.npcs.values()) if (npc.targetId === player.id) npc.targetId = null;
+
+    this.broadcastNear(fromX, fromY, fromPlane, 'msg', { text: `${player.name} climbs ${going}.`, channel: 'system' }, player.id);
+    this.message(player.id, `You climb ${going} into ${destination.name}.`, 'system');
+    this.send(player.id, 'plane', this.planeInfo(player));
+    this.sendState(player);
+    recordEvent(player, 'action', `climb_${destination.id}`);
+    this.checkQuests(player);
+  }
+
+  planeInfo(player) {
+    const level = planeAt(this.world, player.plane);
+    return {
+      plane: player.plane,
+      id: level.id,
+      name: level.name,
+      dark: level.dark,
+      ambient: level.ambient,
+      x: player.x,
+      y: player.y
+    };
+  }
+
   signText(obj) {
+    if (obj.type === 'mine_cart') return 'The cart holds nothing but grit and one very old glove.';
+    if (obj.plane === 1) return 'Chalked on the rock: "Copper and tin above, iron and coal below. Bring a light."';
+    if (obj.plane >= 2) return 'Scratched into the wall: "Deeper still. Bring a friend as well as a light."';
     if (obj.x < 40) return 'Signpost: "Copper Hollow - mind the golems. Ore this way."';
     if (obj.x > 58) return 'Signpost: "Lake Serene - fishing, swimming, and quiet."';
     return 'Signpost: "Emberfall Village. Bank north-west, store north-east, smithy south-west, kitchen south-east."';
@@ -915,7 +1001,7 @@ export class Game {
 
   tickPlayerCombat(player) {
     const npc = this.npcs.get(player.combat.targetId);
-    if (!npc || npc.dead) {
+    if (!npc || npc.dead || npc.plane !== player.plane) {
       player.combat.targetId = null;
       return;
     }
@@ -946,17 +1032,18 @@ export class Game {
 
   tickNpcCombat(npc) {
     const target = this.players.get(npc.targetId);
-    if (!target || target.dead) {
+    if (!target || target.dead || target.plane !== npc.plane) {
+      // Climbing a ladder ends a fight: nothing follows you between levels.
       npc.targetId = null;
       return;
     }
     if (chebyshev(npc.x, npc.y, npc.spawnX, npc.spawnY) > 12) {
       npc.targetId = null;
-      npc.path = findPath(this.world, npc.x, npc.y, npc.spawnX, npc.spawnY);
+      npc.path = findPath(this.world, npc.x, npc.y, npc.spawnX, npc.spawnY, { plane: npc.plane });
       return;
     }
     if (!isAdjacent(npc.x, npc.y, target.x, target.y)) {
-      if (npc.path.length === 0) npc.path = findPath(this.world, npc.x, npc.y, target.x, target.y, { range: 1 });
+      if (npc.path.length === 0) npc.path = findPath(this.world, npc.x, npc.y, target.x, target.y, { range: 1, plane: npc.plane });
       return;
     }
     npc.path = [];
@@ -979,6 +1066,7 @@ export class Game {
   pushSplat(entity, damage, kind) {
     const splat = { id: entity.id, damage, kind };
     for (const player of this.players.values()) {
+      if (player.plane !== (entity.plane ?? SURFACE)) continue;
       if (chebyshev(player.x, player.y, entity.x, entity.y) <= VIEW_RADIUS) player.splats.push(splat);
     }
   }
@@ -997,7 +1085,7 @@ export class Game {
       const min = drop.min ?? 1;
       const max = drop.max ?? min;
       const count = min + Math.floor(this.rng() * (max - min + 1));
-      if (count > 0) this.spawnGroundItem(drop.id, count, npc.x, npc.y, player.id);
+      if (count > 0) this.spawnGroundItem(drop.id, count, npc.x, npc.y, npc.plane, player.id);
     }
 
     recordEvent(player, 'kill', npc.type);
@@ -1014,6 +1102,7 @@ export class Game {
     player.respawnAt = this.tickCount + RESPAWN_TICKS;
     for (const npc of this.npcs.values()) if (npc.targetId === player.id) npc.targetId = null;
     this.message(player.id, 'You have been knocked out! You will wake up in Emberfall shortly.', 'system');
+    player.wokeUnderground = player.plane !== SURFACE;
     this.send(player.id, 'effect', { kind: 'knockout' });
   }
 
@@ -1021,10 +1110,21 @@ export class Game {
     player.dead = false;
     player.x = SPAWN_POINT.x;
     player.y = SPAWN_POINT.y;
+    // However deep you were, you always wake up on the surface. Losing the walk
+    // back down is the whole cost of being knocked out.
+    player.plane = SURFACE;
+    player.seen.clear();
     player.hp = this.maxHp(player);
     player.energy = RUN_ENERGY_MAX;
     player.combat.timer = 0;
-    this.message(player.id, 'You wake up by the fountain, dusted off and none the worse.', 'system');
+    this.message(
+      player.id,
+      player.wokeUnderground
+        ? 'Someone carried you up the ladder. You wake up by the fountain, no worse for it.'
+        : 'You wake up by the fountain, dusted off and none the worse.',
+      'system'
+    );
+    player.wokeUnderground = false;
     this.send(player.id, 'effect', { kind: 'respawn' });
   }
 
@@ -1133,7 +1233,7 @@ export class Game {
       case 'giveItem': {
         const count = effect.count || 1;
         if (spaceFor(player.inventory, effect.id, count) < count) {
-          this.spawnGroundItem(effect.id, count, player.x, player.y, player.id);
+          this.spawnGroundItem(effect.id, count, player.x, player.y, player.plane, player.id);
           this.message(player.id, `You have no room, so the ${itemName(effect.id).toLowerCase()} drops at your feet.`);
         } else {
           addItem(player.inventory, effect.id, count);
@@ -1175,7 +1275,7 @@ export class Game {
     if (rewards.coins) addItem(player.inventory, 'coins', rewards.coins);
     for (const item of rewards.items || []) {
       if (spaceFor(player.inventory, item.id, item.count) < item.count) {
-        this.spawnGroundItem(item.id, item.count, player.x, player.y, player.id);
+        this.spawnGroundItem(item.id, item.count, player.x, player.y, player.plane, player.id);
       } else {
         addItem(player.inventory, item.id, item.count);
       }
@@ -1357,6 +1457,7 @@ export class Game {
       this.message(player.id, 'Somebody is already trading.');
       return;
     }
+    if (other.plane !== player.plane) return;
     other.tradeRequestFrom = player.id;
     this.message(player.id, `You send a trade request to ${other.name}.`);
     this.message(other.id, `${player.name} wishes to trade with you. Click them to accept.`, 'system');
@@ -1533,7 +1634,7 @@ export class Game {
     let moved = false;
     for (let i = 0; i < steps && player.path.length > 0; i += 1) {
       const next = player.path.shift();
-      if (!isWalkable(this.world, next.x, next.y)) {
+      if (!isWalkable(this.world, next.x, next.y, player.plane)) {
         player.path = [];
         break;
       }
@@ -1596,7 +1697,7 @@ export class Game {
 
     if (!npc.targetId && npc.def.aggressive) {
       for (const player of this.players.values()) {
-        if (player.dead) continue;
+        if (player.dead || player.plane !== npc.plane) continue;
         // Creatures ignore anyone who simply wandered past out of reach, and
         // never pick on a character less than a third of their level.
         if (combatLevel(player.skills) * 3 < (npc.def.level || 1)) continue;
@@ -1617,13 +1718,13 @@ export class Game {
         const area = npc.area;
         const tx = area.x + Math.floor(this.rng() * area.w);
         const ty = area.y + Math.floor(this.rng() * area.h);
-        if (isWalkable(this.world, tx, ty)) npc.path = findPath(this.world, npc.x, npc.y, tx, ty);
+        if (isWalkable(this.world, tx, ty, npc.plane)) npc.path = findPath(this.world, npc.x, npc.y, tx, ty, { plane: npc.plane });
       }
     }
 
     if (npc.path && npc.path.length > 0) {
       const next = npc.path.shift();
-      if (isWalkable(this.world, next.x, next.y)) {
+      if (isWalkable(this.world, next.x, next.y, npc.plane)) {
         npc.dir = directionBetween(npc.x, npc.y, next.x, next.y) || npc.dir;
         npc.x = next.x;
         npc.y = next.y;
@@ -1655,6 +1756,7 @@ export class Game {
       worldSeed: this.world.seed,
       checksum: this.world.checksum,
       spawn: { x: player.x, y: player.y },
+      plane: this.planeInfo(player),
       isNew: player.isNew
     });
     this.sendInventory(player);
@@ -1710,6 +1812,7 @@ export class Game {
     const objects = [];
 
     for (const other of this.players.values()) {
+      if (other.plane !== player.plane) continue;
       if (chebyshev(player.x, player.y, other.x, other.y) > VIEW_RADIUS) continue;
       const seenVersion = player.seen.get(other.id);
       const entry = {
@@ -1736,7 +1839,7 @@ export class Game {
     }
 
     for (const npc of this.npcs.values()) {
-      if (npc.dead) continue;
+      if (npc.dead || npc.plane !== player.plane) continue;
       if (chebyshev(player.x, player.y, npc.x, npc.y) > VIEW_RADIUS) continue;
       npcs.push({
         id: npc.id,
@@ -1755,15 +1858,17 @@ export class Game {
     }
 
     for (const item of this.groundItems.values()) {
+      if (item.plane !== player.plane) continue;
       if (chebyshev(player.x, player.y, item.x, item.y) > VIEW_RADIUS) continue;
       items.push({ id: item.id, itemId: item.itemId, count: item.count, x: item.x, y: item.y });
     }
 
-    for (const obj of this.world.objects) {
+    for (const obj of planeAt(this.world, player.plane).objects) {
       if (chebyshev(player.x, player.y, obj.x, obj.y) > VIEW_RADIUS) continue;
       if (obj.depletedUntil > this.tickCount) objects.push({ id: obj.id, depleted: true });
     }
     for (const obj of this.dynamicObjects.values()) {
+      if (obj.plane !== player.plane) continue;
       if (chebyshev(player.x, player.y, obj.x, obj.y) > VIEW_RADIUS) continue;
       objects.push({ id: obj.id, type: obj.type, x: obj.x, y: obj.y, dynamic: true });
     }
@@ -1773,6 +1878,7 @@ export class Game {
       self: {
         x: player.x,
         y: player.y,
+        plane: player.plane,
         dir: player.dir,
         hp: player.hp,
         maxHp: this.maxHp(player),
@@ -1782,7 +1888,7 @@ export class Game {
         dead: player.dead,
         inCombat: player.combat.timer > 0,
         targetId: player.combat.targetId,
-        region: regionAt(this.world, player.x, player.y).name,
+        region: regionAt(this.world, player.x, player.y, player.plane).name,
         busy: Boolean(player.action)
       },
       players,
@@ -1795,6 +1901,12 @@ export class Game {
 }
 
 // ---------------------------------------------------------------- utilities
+
+/** Keeps a loaded save on a plane that actually exists. */
+function clampPlane(value) {
+  const plane = Math.floor(Number(value));
+  return Number.isFinite(plane) && plane >= 0 && plane < PLANE_COUNT ? plane : SURFACE;
+}
 
 function directionBetween(fromX, fromY, toX, toY) {
   const dx = toX - fromX;
