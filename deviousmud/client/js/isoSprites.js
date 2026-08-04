@@ -983,7 +983,8 @@ const NPC_PALETTES = {
   miner: { shirt: '#8a6a3a', legs: '#4a4a4a', skin: '#a06a3f', hair: '#2b2118', hairStyle: 'short' },
   fisher: { shirt: '#16a085', legs: '#34495e', skin: '#f3d2b3', hair: '#8d8d8d', hairStyle: 'short' },
   guard: { shirt: '#95a5a6', legs: '#2c3e50', skin: '#c98d5f', hair: '#2b2118', hairStyle: 'bald' },
-  tutor: { shirt: '#5dade2', legs: '#4a3f6b', skin: '#7a4a2a', hair: '#2b2118', hairStyle: 'curly' }
+  tutor: { shirt: '#5dade2', legs: '#4a3f6b', skin: '#7a4a2a', hair: '#2b2118', hairStyle: 'curly' },
+  foreman: { shirt: '#a8641f', legs: '#3c3226', skin: '#c98d5f', hair: '#8d8d8d', hairStyle: 'short' }
 };
 
 /** Four-legged creatures, built from an iso body ellipse and a raised head. */

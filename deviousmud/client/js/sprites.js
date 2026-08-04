@@ -468,7 +468,8 @@ const NPC_PALETTES = {
   miner: { shirt: '#8a6a3a', legs: '#4a4a4a', skin: '#a06a3f', hair: '#2b2118' },
   fisher: { shirt: '#16a085', legs: '#34495e', skin: '#f3d2b3', hair: '#8d8d8d' },
   guard: { shirt: '#95a5a6', legs: '#2c3e50', skin: '#c98d5f', hair: '#2b2118' },
-  tutor: { shirt: '#5dade2', legs: '#4a3f6b', skin: '#7a4a2a', hair: '#2b2118' }
+  tutor: { shirt: '#5dade2', legs: '#4a3f6b', skin: '#7a4a2a', hair: '#2b2118' },
+  foreman: { shirt: '#a8641f', legs: '#3c3226', skin: '#c98d5f', hair: '#8d8d8d' }
 };
 
 const CREATURE_PAINTERS = {

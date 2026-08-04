@@ -4733,7 +4733,9 @@ const RAW_ITEMS = [
 
   // -------------------------------------------------------------- quest items
   { id: 'ancient_coin', name: 'Ancient coin', examine: 'Older than the village itself.', value: 0, questItem: true, shape: 'coin', palette: ['#cfd8dc', '#8a9298'] },
-  { id: 'mine_key', name: 'Hollow key', examine: 'Opens the old mine gate.', value: 0, questItem: true, shape: 'key', palette: ['#ffd75e', '#8a6a2b'] }
+  { id: 'mine_key', name: 'Hollow key', examine: 'Opens the old mine gate.', value: 0, questItem: true, shape: 'key', palette: ['#ffd75e', '#8a6a2b'] },
+  { id: 'forge_wardens_ring', name: 'Forge-warden\'s ring', examine: 'Given for letting something sleep.', value: 0, questItem: true, slot: 'ring', bonuses: { attack: 6, strength: 6, defence: 6 }, shape: 'ring', palette: ['#ff8a3d', '#ffd166'] },
+  { id: 'dorns_tally', name: 'Dorn\'s tally stick', examine: 'Notched once for every year the mine stood empty.', value: 0, questItem: true, shape: 'log', palette: ['#8b5a2b', '#f2c14e'] }
 ];
 const ITEMS = Object.freeze(
   Object.fromEntries(
@@ -4951,6 +4953,14 @@ const NPC_TYPES = Object.freeze({
     name: 'Tutor Pip', friendly: true, art: 'tutor', examine: 'Always happy to explain something twice.',
     dialogue: 'tutor_pip', wander: 1
   },
+  foreman_dorn: {
+    name: 'Foreman Dorn', friendly: true, art: 'foreman', examine: 'He has waited thirty years for the mine to reopen.',
+    dialogue: 'foreman_dorn', wander: 0
+  },
+  foreman_dorn: {
+    name: 'Foreman Dorn', friendly: true, art: 'foreman', examine: 'He has been waiting for the mine to reopen for thirty years.',
+    dialogue: 'foreman_dorn', wander: 0
+  },
 
   // -------------------------------------------------------------- creatures
   giant_rat: {
@@ -5157,6 +5167,9 @@ const NPC_SPAWNS = Object.freeze([
   // --------------------------------------------------------------- the mine
   // Spawns are addressed by room, so moving a gallery in the floor plan moves
   // whatever lives in it. Every level ramps upwards away from its ladder.
+  // Dorn stands at the foot of the first ladder, which is where anyone coming
+  // down for the first time arrives.
+  ...roomSpawns(1, 'landing', 'foreman_dorn', 1),
   ...roomSpawns(1, 'copper', 'cave_bat', 3),
   ...roomSpawns(1, 'tin', 'cave_bat', 2),
   ...roomSpawns(1, 'gallery', 'tunnel_crawler', 3),
@@ -5335,6 +5348,99 @@ const QUESTS = Object.freeze({
       items: [{ id: 'guardian_blade', count: 1 }],
       xp: { mining: 2500, smithing: 2500, attack: 1200, defence: 1200 },
       text: 'Mira names the seam after you. You will never hear the end of it.'
+    }
+  },
+
+  // ---------------------------------------------------------------- the mine
+  // Four quests that walk a player down the shaft one level at a time: get a
+  // light, earn the first level, reach the second, and finally settle what is
+  // keeping the whole hollow warm.
+
+  lights_in_the_dark: {
+    id: 'lights_in_the_dark',
+    name: 'Lights in the Dark',
+    difficulty: 'Novice',
+    length: 'Short',
+    startHint: 'Speak to Miner Mira once the seam is open.',
+    description: 'Mira has opened the old seam. Before anyone goes down it, they will need something to see by.',
+    requires: { quests: ['the_deep_seam'] },
+    stages: [
+      { id: 1, journal: 'Mira wants me to get hold of a torch before going down.', objective: { type: 'collect', item: 'torch', count: 1, label: 'Get a torch (Bea sells them)' } },
+      { id: 2, journal: 'Now to climb down into the mine itself.', objective: { type: 'action', action: 'climb_mine_upper', count: 1, label: 'Climb down into Copper Hollow Mine' } },
+      { id: 3, journal: 'Somebody is already down here. I should find them.', objective: { type: 'talk', npc: 'foreman_dorn', label: 'Find Foreman Dorn at the foot of the ladder' } }
+    ],
+    rewards: {
+      coins: 600,
+      items: [{ id: 'miners_lantern', count: 1 }],
+      xp: { mining: 800, firemaking: 400 },
+      text: 'Dorn hands you a proper lantern. "Torches blow out," he says. "This one does not."'
+    }
+  },
+
+  the_foremans_tally: {
+    id: 'the_foremans_tally',
+    name: 'The Foreman\'s Tally',
+    difficulty: 'Intermediate',
+    length: 'Medium',
+    startHint: 'Speak to Foreman Dorn in Copper Hollow Mine.',
+    description: 'Dorn has been counting the years the mine stood empty. He would rather start counting ore again.',
+    requires: { quests: ['lights_in_the_dark'], skills: { mining: 15 } },
+    stages: [
+      { id: 1, journal: 'Dorn wants the bats cleared out of the upper galleries.', objective: { type: 'kill', npc: 'cave_bat', count: 6, label: 'See off 6 cave bats' } },
+      { id: 2, journal: 'And the crawlers in the far tunnels.', objective: { type: 'kill', npc: 'tunnel_crawler', count: 4, label: 'See off 4 tunnel crawlers' } },
+      { id: 3, journal: 'Now to prove the seam is worth working: eight iron ore.', objective: { type: 'collect', item: 'iron_ore', count: 8, label: 'Mine 8 iron ore' } },
+      { id: 4, journal: 'Dorn will want to see the ore counted.', objective: { type: 'talk', npc: 'foreman_dorn', label: 'Bring the ore to Foreman Dorn' } }
+    ],
+    rewards: {
+      coins: 1200,
+      items: [{ id: 'miners_boots', count: 1 }, { id: 'dorns_tally', count: 1 }],
+      xp: { mining: 2500, smithing: 1200, attack: 800, defence: 800 },
+      text: 'Dorn notches the tally stick one last time, then gives it to you.'
+    }
+  },
+
+  deeper_than_dorn_went: {
+    id: 'deeper_than_dorn_went',
+    name: 'Deeper Than Dorn Went',
+    difficulty: 'Experienced',
+    length: 'Long',
+    startHint: 'Speak to Foreman Dorn once the upper mine is working again.',
+    description: 'There is a second ladder, and a metal nobody in Emberfall has ever smelted. Dorn will not go down it himself.',
+    requires: { quests: ['the_foremans_tally'], skills: { mining: 30, defence: 15 } },
+    stages: [
+      { id: 1, journal: 'Dorn pointed me at the second ladder, down to the Deep Seam.', objective: { type: 'action', action: 'climb_mine_deep', count: 1, label: 'Climb down into The Deep Seam' } },
+      { id: 2, journal: 'The blue-green rock down here is mithril. Three should do.', objective: { type: 'collect', item: 'mithril_ore', count: 3, label: 'Mine 3 mithril ore' } },
+      { id: 3, journal: 'One mithril bar - the furnace will want coal with it.', objective: { type: 'collect', item: 'mithril_bar', count: 1, label: 'Smelt a mithril bar' } },
+      { id: 4, journal: 'The deep golems will not let anyone work the seam.', objective: { type: 'kill', npc: 'deep_golem', count: 3, label: 'See off 3 deep golems' } },
+      { id: 5, journal: 'Dorn has been waiting at the top of the ladder this whole time.', objective: { type: 'talk', npc: 'foreman_dorn', label: 'Report back to Foreman Dorn' } }
+    ],
+    rewards: {
+      coins: 2500,
+      items: [{ id: 'mithril_pickaxe', count: 1 }],
+      xp: { mining: 7000, smithing: 5000, attack: 2000, defence: 2000, hitpoints: 1500 },
+      text: 'Dorn holds the bar up to his lantern for a long time without saying anything.'
+    }
+  },
+
+  the_sleeping_forge: {
+    id: 'the_sleeping_forge',
+    name: 'The Sleeping Forge',
+    difficulty: 'Master',
+    length: 'Long',
+    startHint: 'Speak to Miner Mira with the Deep Seam behind you.',
+    description: 'Something at the bottom of the mine has been dreaming too hot for a very long time. Mira would like it to sleep more quietly.',
+    requires: { quests: ['deeper_than_dorn_went'], skills: { attack: 40, defence: 35, mining: 40 } },
+    stages: [
+      { id: 1, journal: 'Mira wants two ember shards from the bottom of the mine.', objective: { type: 'collect', item: 'ember_shard', count: 2, label: 'Recover 2 ember shards' } },
+      { id: 2, journal: 'The guardians of the Ember Chamber will have to be moved aside.', objective: { type: 'kill', npc: 'cinder_guardian', count: 3, label: 'See off 3 cinder guardians' } },
+      { id: 3, journal: 'Cinderheart itself. Mira says to settle it, not to hurt it.', objective: { type: 'kill', npc: 'cinderheart', count: 1, label: 'Settle Cinderheart back to sleep' } },
+      { id: 4, journal: 'It is sleeping quietly. Mira should hear it from her.', objective: { type: 'talk', npc: 'miner_mira', label: 'Tell Miner Mira it is over' } }
+    ],
+    rewards: {
+      coins: 6000,
+      items: [{ id: 'forge_wardens_ring', count: 1 }],
+      xp: { attack: 12000, strength: 12000, defence: 12000, hitpoints: 8000, mining: 8000, smithing: 8000 },
+      text: 'Mira calls you Forge-warden, and means it. The hollow has never been so quiet.'
     }
   }
 });
@@ -6354,7 +6460,12 @@ const DIALOGUE = Object.freeze({
   // -------------------------------------------------------------------------
   miner_mira: {
     entry: [
-      { when: { quest: 'the_deep_seam', completed: true }, node: 'done' },
+      { when: { quest: 'the_sleeping_forge', completed: true }, node: 'forge_done' },
+      { when: { quest: 'the_sleeping_forge', stageMin: 4 }, node: 'forge_finish' },
+      { when: { quest: 'the_sleeping_forge', stageMin: 1, stageMax: 3 }, node: 'forge_progress' },
+      { when: { quest: 'deeper_than_dorn_went', completed: true }, node: 'forge_offer' },
+      { when: { quest: 'lights_in_the_dark', stageMin: 1 }, node: 'lights_progress' },
+      { when: { quest: 'the_deep_seam', completed: true }, node: 'lights_offer' },
       { when: { quest: 'the_deep_seam', stageMin: 4 }, node: 'finish' },
       { when: { quest: 'the_deep_seam', stageMin: 2, stageMax: 3 }, node: 'golems' },
       { when: { quest: 'the_deep_seam', stageMin: 1, stageMax: 1 }, node: 'bars' },
@@ -6412,6 +6523,190 @@ const DIALOGUE = Object.freeze({
       done: {
         speaker: 'npc',
         text: 'I have not opened it yet. When I do, you will be the first to know.',
+        next: null
+      },
+
+      // ------------------------------------------------ Lights in the Dark
+      lights_offer: {
+        speaker: 'npc',
+        text: 'Well. The coin turned the lock, and there is a shaft down there going a long way further than I expected. I am not sending anyone into that in the dark.',
+        options: [
+          { text: 'I will get a light and go down.', next: 'lights_accept', effects: [{ type: 'startQuest', quest: 'lights_in_the_dark' }] },
+          { text: 'What is down there?', next: 'lights_what' }
+        ]
+      },
+      lights_what: {
+        speaker: 'npc',
+        text: 'Ore, mostly. Bats, certainly. And it is warm - far warmer than a hole in the ground has any business being. Get a torch from Bea first.',
+        options: [
+          { text: 'I will get a light and go down.', next: 'lights_accept', effects: [{ type: 'startQuest', quest: 'lights_in_the_dark' }] },
+          { text: 'Let me think about it.', next: null }
+        ]
+      },
+      lights_accept: {
+        speaker: 'npc',
+        text: 'Bea keeps torches by the door. The shaft is right where the old quarry meets the west wall - you cannot miss the timbers.',
+        next: null
+      },
+      lights_progress: {
+        speaker: 'npc',
+        text: 'Torch first, then the shaft by the west wall. And say hello to whoever is down there - I heard someone singing.',
+        next: null
+      },
+
+      // ------------------------------------------------ The Sleeping Forge
+      forge_offer: {
+        speaker: 'npc',
+        text: 'Dorn showed me the mithril. He also told me how hot it gets on the way down. That is not a furnace, that is something breathing.',
+        options: [
+          { text: 'Then I will go and see it.', next: 'forge_accept', effects: [{ type: 'startQuest', quest: 'the_sleeping_forge' }] },
+          { text: 'Breathing?', next: 'forge_what' }
+        ]
+      },
+      forge_what: {
+        speaker: 'npc',
+        text: 'Cinderheart. My grandmother had a word for it. It is not wicked - it is asleep, and it has been dreaming much too hot for a hundred years. Settle it. Do not hurt it.',
+        options: [
+          { text: 'Then I will go and see it.', next: 'forge_accept', effects: [{ type: 'startQuest', quest: 'the_sleeping_forge' }] },
+          { text: 'I need to prepare properly.', next: null }
+        ]
+      },
+      forge_accept: {
+        speaker: 'npc',
+        text: 'Bring me two ember shards from the bottom, and take the best armour Emberfall can make. The guardians will not step aside politely.',
+        next: null
+      },
+      forge_progress: {
+        speaker: 'npc',
+        text: 'Two shards, past the guardians, and then be gentle with it. It is only having a bad dream.',
+        next: null
+      },
+      forge_finish: {
+        speaker: 'npc',
+        text: 'The whole hollow has gone cool. I can hear it breathing slowly from up here. Forge-warden - that is what my grandmother called whoever did this last time. It suits you.',
+        effects: [{ type: 'takeItem', id: 'ember_shard', count: 2 }, { type: 'completeQuest', quest: 'the_sleeping_forge' }],
+        next: null
+      },
+      forge_done: {
+        speaker: 'npc',
+        text: 'Warm rock, cool air, and ore for a hundred years. You did that. Go and put your feet up.',
+        next: null
+      }
+    }
+  },
+
+  // -------------------------------------------------------------------------
+  foreman_dorn: {
+    entry: [
+      { when: { quest: 'deeper_than_dorn_went', completed: true }, node: 'deeper_done' },
+      { when: { quest: 'deeper_than_dorn_went', stageMin: 5 }, node: 'deeper_finish' },
+      { when: { quest: 'deeper_than_dorn_went', stageMin: 1, stageMax: 4 }, node: 'deeper_progress' },
+      { when: { quest: 'the_foremans_tally', completed: true }, node: 'deeper_offer' },
+      { when: { quest: 'the_foremans_tally', stageMin: 4 }, node: 'tally_finish' },
+      { when: { quest: 'the_foremans_tally', stageMin: 1, stageMax: 3 }, node: 'tally_progress' },
+      { when: { quest: 'lights_in_the_dark', completed: true }, node: 'tally_offer' },
+      { when: { quest: 'lights_in_the_dark', stageMin: 3 }, node: 'lights_finish' },
+      { node: 'greet' }
+    ],
+    nodes: {
+      greet: {
+        speaker: 'npc',
+        text: 'Thirty years I have sat at the bottom of this ladder with a lamp and a stick, waiting for someone to open the top of it. Mind the bats.',
+        options: [
+          { text: 'Thirty years?', next: 'why' },
+          { text: 'What is worth mining down here?', next: 'ore' },
+          { text: 'I will mind the bats.', next: null }
+        ]
+      },
+      why: {
+        speaker: 'npc',
+        text: 'Somebody had to. A mine with nobody in it stops being a mine and starts being a hole. I kept the braziers lit.',
+        next: null
+      },
+      ore: {
+        speaker: 'npc',
+        text: 'Copper and tin at this level, iron and coal deeper in. And further down than I have ever been, something blue-green that I could never get out of the rock.',
+        next: null
+      },
+
+      // ------------------------------------------------ Lights in the Dark
+      lights_finish: {
+        speaker: 'npc',
+        text: 'Well I never. Somebody came down. Put that torch away before it blows out and take this - it is a proper miner\'s lantern, and it has outlasted three foremen.',
+        effects: [{ type: 'completeQuest', quest: 'lights_in_the_dark' }],
+        next: null
+      },
+
+      // ------------------------------------------------ The Foreman's Tally
+      tally_offer: {
+        speaker: 'npc',
+        text: 'Now you are here with a light that works, I have a proposition. This mine is worth reopening, and I need to be able to prove it to the mayor. Clear the vermin, and bring me eight iron.',
+        options: [
+          { text: 'Consider it counted.', next: 'tally_accept', effects: [{ type: 'startQuest', quest: 'the_foremans_tally' }] },
+          { text: 'Vermin?', next: 'tally_what' }
+        ]
+      },
+      tally_what: {
+        speaker: 'npc',
+        text: 'Six bats in the upper galleries, four crawlers in the far tunnels. Neither will do you much harm, but neither will let a miner work.',
+        options: [
+          { text: 'Consider it counted.', next: 'tally_accept', effects: [{ type: 'startQuest', quest: 'the_foremans_tally' }] },
+          { text: 'Another time.', next: null }
+        ]
+      },
+      tally_accept: {
+        speaker: 'npc',
+        text: 'Six bats, four crawlers, eight iron. I will notch the stick as you go.',
+        next: null
+      },
+      tally_progress: {
+        speaker: 'npc',
+        text: 'Bats, crawlers, iron. Take your time - I have had thirty years of practice at waiting.',
+        next: null
+      },
+      tally_finish: {
+        speaker: 'npc',
+        text: 'Eight iron and a quiet gallery. That is a working mine. Here - boots, and the stick. I have no more use for counting empty years.',
+        effects: [{ type: 'completeQuest', quest: 'the_foremans_tally' }],
+        next: null
+      },
+
+      // --------------------------------------------- Deeper Than Dorn Went
+      deeper_offer: {
+        speaker: 'npc',
+        text: 'There is a second ladder in the far gallery. I have stood at the top of it for thirty years and never once gone down. My knees, you understand.',
+        options: [
+          { text: 'I will go down it.', next: 'deeper_accept', effects: [{ type: 'startQuest', quest: 'deeper_than_dorn_went' }] },
+          { text: 'What is down there?', next: 'deeper_what' }
+        ]
+      },
+      deeper_what: {
+        speaker: 'npc',
+        text: 'The blue-green rock. Mithril, my grandfather called it - lighter than steel and twice as sharp. Bring me three ore and a bar smelted from it, and see off the golems while you are at it.',
+        options: [
+          { text: 'I will go down it.', next: 'deeper_accept', effects: [{ type: 'startQuest', quest: 'deeper_than_dorn_went' }] },
+          { text: 'Not yet.', next: null }
+        ]
+      },
+      deeper_accept: {
+        speaker: 'npc',
+        text: 'Mithril wants coal with it in the furnace - three lumps to the ore, and a hot fire. Mind the golems down there; they are not the polite sort we get up here.',
+        next: null
+      },
+      deeper_progress: {
+        speaker: 'npc',
+        text: 'Second ladder, far gallery. Three ore, one bar, and three golems moved along. I will be right here.',
+        next: null
+      },
+      deeper_finish: {
+        speaker: 'npc',
+        text: 'Thirty years, and a stranger brings it up in a week. Take this pickaxe - it is made of the stuff, and it is wasted on me. Go and tell Mira. She will want to know how warm it was.',
+        effects: [{ type: 'completeQuest', quest: 'deeper_than_dorn_went' }],
+        next: null
+      },
+      deeper_done: {
+        speaker: 'npc',
+        text: 'Careful how far down you go. It gets warmer, and warm rock means something is making it warm.',
         next: null
       }
     }
@@ -7875,7 +8170,8 @@ const NPC_PALETTES = {
   miner: { shirt: '#8a6a3a', legs: '#4a4a4a', skin: '#a06a3f', hair: '#2b2118' },
   fisher: { shirt: '#16a085', legs: '#34495e', skin: '#f3d2b3', hair: '#8d8d8d' },
   guard: { shirt: '#95a5a6', legs: '#2c3e50', skin: '#c98d5f', hair: '#2b2118' },
-  tutor: { shirt: '#5dade2', legs: '#4a3f6b', skin: '#7a4a2a', hair: '#2b2118' }
+  tutor: { shirt: '#5dade2', legs: '#4a3f6b', skin: '#7a4a2a', hair: '#2b2118' },
+  foreman: { shirt: '#a8641f', legs: '#3c3226', skin: '#c98d5f', hair: '#8d8d8d' }
 };
 
 const CREATURE_PAINTERS = {
@@ -9459,7 +9755,8 @@ const NPC_PALETTES = {
   miner: { shirt: '#8a6a3a', legs: '#4a4a4a', skin: '#a06a3f', hair: '#2b2118', hairStyle: 'short' },
   fisher: { shirt: '#16a085', legs: '#34495e', skin: '#f3d2b3', hair: '#8d8d8d', hairStyle: 'short' },
   guard: { shirt: '#95a5a6', legs: '#2c3e50', skin: '#c98d5f', hair: '#2b2118', hairStyle: 'bald' },
-  tutor: { shirt: '#5dade2', legs: '#4a3f6b', skin: '#7a4a2a', hair: '#2b2118', hairStyle: 'curly' }
+  tutor: { shirt: '#5dade2', legs: '#4a3f6b', skin: '#7a4a2a', hair: '#2b2118', hairStyle: 'curly' },
+  foreman: { shirt: '#a8641f', legs: '#3c3226', skin: '#c98d5f', hair: '#8d8d8d', hairStyle: 'short' }
 };
 
 /** Four-legged creatures, built from an iso body ellipse and a raised head. */

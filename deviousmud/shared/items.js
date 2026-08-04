@@ -108,7 +108,9 @@ const RAW_ITEMS = [
 
   // -------------------------------------------------------------- quest items
   { id: 'ancient_coin', name: 'Ancient coin', examine: 'Older than the village itself.', value: 0, questItem: true, shape: 'coin', palette: ['#cfd8dc', '#8a9298'] },
-  { id: 'mine_key', name: 'Hollow key', examine: 'Opens the old mine gate.', value: 0, questItem: true, shape: 'key', palette: ['#ffd75e', '#8a6a2b'] }
+  { id: 'mine_key', name: 'Hollow key', examine: 'Opens the old mine gate.', value: 0, questItem: true, shape: 'key', palette: ['#ffd75e', '#8a6a2b'] },
+  { id: 'forge_wardens_ring', name: 'Forge-warden\'s ring', examine: 'Given for letting something sleep.', value: 0, questItem: true, slot: 'ring', bonuses: { attack: 6, strength: 6, defence: 6 }, shape: 'ring', palette: ['#ff8a3d', '#ffd166'] },
+  { id: 'dorns_tally', name: 'Dorn\'s tally stick', examine: 'Notched once for every year the mine stood empty.', value: 0, questItem: true, shape: 'log', palette: ['#8b5a2b', '#f2c14e'] }
 ];
 
 export const ITEMS = Object.freeze(

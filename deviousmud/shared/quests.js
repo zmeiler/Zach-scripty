@@ -91,6 +91,99 @@ export const QUESTS = Object.freeze({
       xp: { mining: 2500, smithing: 2500, attack: 1200, defence: 1200 },
       text: 'Mira names the seam after you. You will never hear the end of it.'
     }
+  },
+
+  // ---------------------------------------------------------------- the mine
+  // Four quests that walk a player down the shaft one level at a time: get a
+  // light, earn the first level, reach the second, and finally settle what is
+  // keeping the whole hollow warm.
+
+  lights_in_the_dark: {
+    id: 'lights_in_the_dark',
+    name: 'Lights in the Dark',
+    difficulty: 'Novice',
+    length: 'Short',
+    startHint: 'Speak to Miner Mira once the seam is open.',
+    description: 'Mira has opened the old seam. Before anyone goes down it, they will need something to see by.',
+    requires: { quests: ['the_deep_seam'] },
+    stages: [
+      { id: 1, journal: 'Mira wants me to get hold of a torch before going down.', objective: { type: 'collect', item: 'torch', count: 1, label: 'Get a torch (Bea sells them)' } },
+      { id: 2, journal: 'Now to climb down into the mine itself.', objective: { type: 'action', action: 'climb_mine_upper', count: 1, label: 'Climb down into Copper Hollow Mine' } },
+      { id: 3, journal: 'Somebody is already down here. I should find them.', objective: { type: 'talk', npc: 'foreman_dorn', label: 'Find Foreman Dorn at the foot of the ladder' } }
+    ],
+    rewards: {
+      coins: 600,
+      items: [{ id: 'miners_lantern', count: 1 }],
+      xp: { mining: 800, firemaking: 400 },
+      text: 'Dorn hands you a proper lantern. "Torches blow out," he says. "This one does not."'
+    }
+  },
+
+  the_foremans_tally: {
+    id: 'the_foremans_tally',
+    name: 'The Foreman\'s Tally',
+    difficulty: 'Intermediate',
+    length: 'Medium',
+    startHint: 'Speak to Foreman Dorn in Copper Hollow Mine.',
+    description: 'Dorn has been counting the years the mine stood empty. He would rather start counting ore again.',
+    requires: { quests: ['lights_in_the_dark'], skills: { mining: 15 } },
+    stages: [
+      { id: 1, journal: 'Dorn wants the bats cleared out of the upper galleries.', objective: { type: 'kill', npc: 'cave_bat', count: 6, label: 'See off 6 cave bats' } },
+      { id: 2, journal: 'And the crawlers in the far tunnels.', objective: { type: 'kill', npc: 'tunnel_crawler', count: 4, label: 'See off 4 tunnel crawlers' } },
+      { id: 3, journal: 'Now to prove the seam is worth working: eight iron ore.', objective: { type: 'collect', item: 'iron_ore', count: 8, label: 'Mine 8 iron ore' } },
+      { id: 4, journal: 'Dorn will want to see the ore counted.', objective: { type: 'talk', npc: 'foreman_dorn', label: 'Bring the ore to Foreman Dorn' } }
+    ],
+    rewards: {
+      coins: 1200,
+      items: [{ id: 'miners_boots', count: 1 }, { id: 'dorns_tally', count: 1 }],
+      xp: { mining: 2500, smithing: 1200, attack: 800, defence: 800 },
+      text: 'Dorn notches the tally stick one last time, then gives it to you.'
+    }
+  },
+
+  deeper_than_dorn_went: {
+    id: 'deeper_than_dorn_went',
+    name: 'Deeper Than Dorn Went',
+    difficulty: 'Experienced',
+    length: 'Long',
+    startHint: 'Speak to Foreman Dorn once the upper mine is working again.',
+    description: 'There is a second ladder, and a metal nobody in Emberfall has ever smelted. Dorn will not go down it himself.',
+    requires: { quests: ['the_foremans_tally'], skills: { mining: 30, defence: 15 } },
+    stages: [
+      { id: 1, journal: 'Dorn pointed me at the second ladder, down to the Deep Seam.', objective: { type: 'action', action: 'climb_mine_deep', count: 1, label: 'Climb down into The Deep Seam' } },
+      { id: 2, journal: 'The blue-green rock down here is mithril. Three should do.', objective: { type: 'collect', item: 'mithril_ore', count: 3, label: 'Mine 3 mithril ore' } },
+      { id: 3, journal: 'One mithril bar - the furnace will want coal with it.', objective: { type: 'collect', item: 'mithril_bar', count: 1, label: 'Smelt a mithril bar' } },
+      { id: 4, journal: 'The deep golems will not let anyone work the seam.', objective: { type: 'kill', npc: 'deep_golem', count: 3, label: 'See off 3 deep golems' } },
+      { id: 5, journal: 'Dorn has been waiting at the top of the ladder this whole time.', objective: { type: 'talk', npc: 'foreman_dorn', label: 'Report back to Foreman Dorn' } }
+    ],
+    rewards: {
+      coins: 2500,
+      items: [{ id: 'mithril_pickaxe', count: 1 }],
+      xp: { mining: 7000, smithing: 5000, attack: 2000, defence: 2000, hitpoints: 1500 },
+      text: 'Dorn holds the bar up to his lantern for a long time without saying anything.'
+    }
+  },
+
+  the_sleeping_forge: {
+    id: 'the_sleeping_forge',
+    name: 'The Sleeping Forge',
+    difficulty: 'Master',
+    length: 'Long',
+    startHint: 'Speak to Miner Mira with the Deep Seam behind you.',
+    description: 'Something at the bottom of the mine has been dreaming too hot for a very long time. Mira would like it to sleep more quietly.',
+    requires: { quests: ['deeper_than_dorn_went'], skills: { attack: 40, defence: 35, mining: 40 } },
+    stages: [
+      { id: 1, journal: 'Mira wants two ember shards from the bottom of the mine.', objective: { type: 'collect', item: 'ember_shard', count: 2, label: 'Recover 2 ember shards' } },
+      { id: 2, journal: 'The guardians of the Ember Chamber will have to be moved aside.', objective: { type: 'kill', npc: 'cinder_guardian', count: 3, label: 'See off 3 cinder guardians' } },
+      { id: 3, journal: 'Cinderheart itself. Mira says to settle it, not to hurt it.', objective: { type: 'kill', npc: 'cinderheart', count: 1, label: 'Settle Cinderheart back to sleep' } },
+      { id: 4, journal: 'It is sleeping quietly. Mira should hear it from her.', objective: { type: 'talk', npc: 'miner_mira', label: 'Tell Miner Mira it is over' } }
+    ],
+    rewards: {
+      coins: 6000,
+      items: [{ id: 'forge_wardens_ring', count: 1 }],
+      xp: { attack: 12000, strength: 12000, defence: 12000, hitpoints: 8000, mining: 8000, smithing: 8000 },
+      text: 'Mira calls you Forge-warden, and means it. The hollow has never been so quiet.'
+    }
   }
 });
 

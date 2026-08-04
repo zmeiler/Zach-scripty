@@ -213,7 +213,12 @@ export const DIALOGUE = Object.freeze({
   // -------------------------------------------------------------------------
   miner_mira: {
     entry: [
-      { when: { quest: 'the_deep_seam', completed: true }, node: 'done' },
+      { when: { quest: 'the_sleeping_forge', completed: true }, node: 'forge_done' },
+      { when: { quest: 'the_sleeping_forge', stageMin: 4 }, node: 'forge_finish' },
+      { when: { quest: 'the_sleeping_forge', stageMin: 1, stageMax: 3 }, node: 'forge_progress' },
+      { when: { quest: 'deeper_than_dorn_went', completed: true }, node: 'forge_offer' },
+      { when: { quest: 'lights_in_the_dark', stageMin: 1 }, node: 'lights_progress' },
+      { when: { quest: 'the_deep_seam', completed: true }, node: 'lights_offer' },
       { when: { quest: 'the_deep_seam', stageMin: 4 }, node: 'finish' },
       { when: { quest: 'the_deep_seam', stageMin: 2, stageMax: 3 }, node: 'golems' },
       { when: { quest: 'the_deep_seam', stageMin: 1, stageMax: 1 }, node: 'bars' },
@@ -271,6 +276,190 @@ export const DIALOGUE = Object.freeze({
       done: {
         speaker: 'npc',
         text: 'I have not opened it yet. When I do, you will be the first to know.',
+        next: null
+      },
+
+      // ------------------------------------------------ Lights in the Dark
+      lights_offer: {
+        speaker: 'npc',
+        text: 'Well. The coin turned the lock, and there is a shaft down there going a long way further than I expected. I am not sending anyone into that in the dark.',
+        options: [
+          { text: 'I will get a light and go down.', next: 'lights_accept', effects: [{ type: 'startQuest', quest: 'lights_in_the_dark' }] },
+          { text: 'What is down there?', next: 'lights_what' }
+        ]
+      },
+      lights_what: {
+        speaker: 'npc',
+        text: 'Ore, mostly. Bats, certainly. And it is warm - far warmer than a hole in the ground has any business being. Get a torch from Bea first.',
+        options: [
+          { text: 'I will get a light and go down.', next: 'lights_accept', effects: [{ type: 'startQuest', quest: 'lights_in_the_dark' }] },
+          { text: 'Let me think about it.', next: null }
+        ]
+      },
+      lights_accept: {
+        speaker: 'npc',
+        text: 'Bea keeps torches by the door. The shaft is right where the old quarry meets the west wall - you cannot miss the timbers.',
+        next: null
+      },
+      lights_progress: {
+        speaker: 'npc',
+        text: 'Torch first, then the shaft by the west wall. And say hello to whoever is down there - I heard someone singing.',
+        next: null
+      },
+
+      // ------------------------------------------------ The Sleeping Forge
+      forge_offer: {
+        speaker: 'npc',
+        text: 'Dorn showed me the mithril. He also told me how hot it gets on the way down. That is not a furnace, that is something breathing.',
+        options: [
+          { text: 'Then I will go and see it.', next: 'forge_accept', effects: [{ type: 'startQuest', quest: 'the_sleeping_forge' }] },
+          { text: 'Breathing?', next: 'forge_what' }
+        ]
+      },
+      forge_what: {
+        speaker: 'npc',
+        text: 'Cinderheart. My grandmother had a word for it. It is not wicked - it is asleep, and it has been dreaming much too hot for a hundred years. Settle it. Do not hurt it.',
+        options: [
+          { text: 'Then I will go and see it.', next: 'forge_accept', effects: [{ type: 'startQuest', quest: 'the_sleeping_forge' }] },
+          { text: 'I need to prepare properly.', next: null }
+        ]
+      },
+      forge_accept: {
+        speaker: 'npc',
+        text: 'Bring me two ember shards from the bottom, and take the best armour Emberfall can make. The guardians will not step aside politely.',
+        next: null
+      },
+      forge_progress: {
+        speaker: 'npc',
+        text: 'Two shards, past the guardians, and then be gentle with it. It is only having a bad dream.',
+        next: null
+      },
+      forge_finish: {
+        speaker: 'npc',
+        text: 'The whole hollow has gone cool. I can hear it breathing slowly from up here. Forge-warden - that is what my grandmother called whoever did this last time. It suits you.',
+        effects: [{ type: 'takeItem', id: 'ember_shard', count: 2 }, { type: 'completeQuest', quest: 'the_sleeping_forge' }],
+        next: null
+      },
+      forge_done: {
+        speaker: 'npc',
+        text: 'Warm rock, cool air, and ore for a hundred years. You did that. Go and put your feet up.',
+        next: null
+      }
+    }
+  },
+
+  // -------------------------------------------------------------------------
+  foreman_dorn: {
+    entry: [
+      { when: { quest: 'deeper_than_dorn_went', completed: true }, node: 'deeper_done' },
+      { when: { quest: 'deeper_than_dorn_went', stageMin: 5 }, node: 'deeper_finish' },
+      { when: { quest: 'deeper_than_dorn_went', stageMin: 1, stageMax: 4 }, node: 'deeper_progress' },
+      { when: { quest: 'the_foremans_tally', completed: true }, node: 'deeper_offer' },
+      { when: { quest: 'the_foremans_tally', stageMin: 4 }, node: 'tally_finish' },
+      { when: { quest: 'the_foremans_tally', stageMin: 1, stageMax: 3 }, node: 'tally_progress' },
+      { when: { quest: 'lights_in_the_dark', completed: true }, node: 'tally_offer' },
+      { when: { quest: 'lights_in_the_dark', stageMin: 3 }, node: 'lights_finish' },
+      { node: 'greet' }
+    ],
+    nodes: {
+      greet: {
+        speaker: 'npc',
+        text: 'Thirty years I have sat at the bottom of this ladder with a lamp and a stick, waiting for someone to open the top of it. Mind the bats.',
+        options: [
+          { text: 'Thirty years?', next: 'why' },
+          { text: 'What is worth mining down here?', next: 'ore' },
+          { text: 'I will mind the bats.', next: null }
+        ]
+      },
+      why: {
+        speaker: 'npc',
+        text: 'Somebody had to. A mine with nobody in it stops being a mine and starts being a hole. I kept the braziers lit.',
+        next: null
+      },
+      ore: {
+        speaker: 'npc',
+        text: 'Copper and tin at this level, iron and coal deeper in. And further down than I have ever been, something blue-green that I could never get out of the rock.',
+        next: null
+      },
+
+      // ------------------------------------------------ Lights in the Dark
+      lights_finish: {
+        speaker: 'npc',
+        text: 'Well I never. Somebody came down. Put that torch away before it blows out and take this - it is a proper miner\'s lantern, and it has outlasted three foremen.',
+        effects: [{ type: 'completeQuest', quest: 'lights_in_the_dark' }],
+        next: null
+      },
+
+      // ------------------------------------------------ The Foreman's Tally
+      tally_offer: {
+        speaker: 'npc',
+        text: 'Now you are here with a light that works, I have a proposition. This mine is worth reopening, and I need to be able to prove it to the mayor. Clear the vermin, and bring me eight iron.',
+        options: [
+          { text: 'Consider it counted.', next: 'tally_accept', effects: [{ type: 'startQuest', quest: 'the_foremans_tally' }] },
+          { text: 'Vermin?', next: 'tally_what' }
+        ]
+      },
+      tally_what: {
+        speaker: 'npc',
+        text: 'Six bats in the upper galleries, four crawlers in the far tunnels. Neither will do you much harm, but neither will let a miner work.',
+        options: [
+          { text: 'Consider it counted.', next: 'tally_accept', effects: [{ type: 'startQuest', quest: 'the_foremans_tally' }] },
+          { text: 'Another time.', next: null }
+        ]
+      },
+      tally_accept: {
+        speaker: 'npc',
+        text: 'Six bats, four crawlers, eight iron. I will notch the stick as you go.',
+        next: null
+      },
+      tally_progress: {
+        speaker: 'npc',
+        text: 'Bats, crawlers, iron. Take your time - I have had thirty years of practice at waiting.',
+        next: null
+      },
+      tally_finish: {
+        speaker: 'npc',
+        text: 'Eight iron and a quiet gallery. That is a working mine. Here - boots, and the stick. I have no more use for counting empty years.',
+        effects: [{ type: 'completeQuest', quest: 'the_foremans_tally' }],
+        next: null
+      },
+
+      // --------------------------------------------- Deeper Than Dorn Went
+      deeper_offer: {
+        speaker: 'npc',
+        text: 'There is a second ladder in the far gallery. I have stood at the top of it for thirty years and never once gone down. My knees, you understand.',
+        options: [
+          { text: 'I will go down it.', next: 'deeper_accept', effects: [{ type: 'startQuest', quest: 'deeper_than_dorn_went' }] },
+          { text: 'What is down there?', next: 'deeper_what' }
+        ]
+      },
+      deeper_what: {
+        speaker: 'npc',
+        text: 'The blue-green rock. Mithril, my grandfather called it - lighter than steel and twice as sharp. Bring me three ore and a bar smelted from it, and see off the golems while you are at it.',
+        options: [
+          { text: 'I will go down it.', next: 'deeper_accept', effects: [{ type: 'startQuest', quest: 'deeper_than_dorn_went' }] },
+          { text: 'Not yet.', next: null }
+        ]
+      },
+      deeper_accept: {
+        speaker: 'npc',
+        text: 'Mithril wants coal with it in the furnace - three lumps to the ore, and a hot fire. Mind the golems down there; they are not the polite sort we get up here.',
+        next: null
+      },
+      deeper_progress: {
+        speaker: 'npc',
+        text: 'Second ladder, far gallery. Three ore, one bar, and three golems moved along. I will be right here.',
+        next: null
+      },
+      deeper_finish: {
+        speaker: 'npc',
+        text: 'Thirty years, and a stranger brings it up in a week. Take this pickaxe - it is made of the stuff, and it is wasted on me. Go and tell Mira. She will want to know how warm it was.',
+        effects: [{ type: 'completeQuest', quest: 'deeper_than_dorn_went' }],
+        next: null
+      },
+      deeper_done: {
+        speaker: 'npc',
+        text: 'Careful how far down you go. It gets warmer, and warm rock means something is making it warm.',
         next: null
       }
     }

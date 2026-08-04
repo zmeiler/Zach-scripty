@@ -42,6 +42,14 @@ export const NPC_TYPES = Object.freeze({
     name: 'Tutor Pip', friendly: true, art: 'tutor', examine: 'Always happy to explain something twice.',
     dialogue: 'tutor_pip', wander: 1
   },
+  foreman_dorn: {
+    name: 'Foreman Dorn', friendly: true, art: 'foreman', examine: 'He has waited thirty years for the mine to reopen.',
+    dialogue: 'foreman_dorn', wander: 0
+  },
+  foreman_dorn: {
+    name: 'Foreman Dorn', friendly: true, art: 'foreman', examine: 'He has been waiting for the mine to reopen for thirty years.',
+    dialogue: 'foreman_dorn', wander: 0
+  },
 
   // -------------------------------------------------------------- creatures
   giant_rat: {
@@ -248,6 +256,9 @@ export const NPC_SPAWNS = Object.freeze([
   // --------------------------------------------------------------- the mine
   // Spawns are addressed by room, so moving a gallery in the floor plan moves
   // whatever lives in it. Every level ramps upwards away from its ladder.
+  // Dorn stands at the foot of the first ladder, which is where anyone coming
+  // down for the first time arrives.
+  ...roomSpawns(1, 'landing', 'foreman_dorn', 1),
   ...roomSpawns(1, 'copper', 'cave_bat', 3),
   ...roomSpawns(1, 'tin', 'cave_bat', 2),
   ...roomSpawns(1, 'gallery', 'tunnel_crawler', 3),
