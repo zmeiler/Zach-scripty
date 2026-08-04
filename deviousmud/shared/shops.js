@@ -14,6 +14,8 @@ export const SHOPS = Object.freeze({
       { id: 'fishing_rod', base: 10 },
       { id: 'small_net', base: 10 },
       { id: 'tinderbox', base: 10 },
+      { id: 'torch', base: 15 },
+      { id: 'miners_lantern', base: 3 },
       { id: 'hammer', base: 10 },
       { id: 'bread', base: 20 },
       { id: 'honey_cake', base: 5 },

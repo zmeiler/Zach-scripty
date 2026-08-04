@@ -324,6 +324,23 @@ export class Game {
     return player.skills.hitpoints.level;
   }
 
+  /**
+   * How far a player can see in the dark, in tiles. The best light they are
+   * carrying wins - there is no reason to make someone juggle two lanterns.
+   */
+  lightRadius(player) {
+    let best = 0;
+    for (const slot of player.inventory) {
+      const def = slot && getItem(slot.id);
+      if (def && def.light > best) best = def.light;
+    }
+    for (const worn of Object.values(player.equipment)) {
+      const def = worn && getItem(worn.id);
+      if (def && def.light > best) best = def.light;
+    }
+    return best;
+  }
+
   // ----------------------------------------------------------- command entry
 
   /**
@@ -719,6 +736,10 @@ export class Game {
       case 'climb':
         this.climb(player, obj);
         break;
+      case 'warm':
+        player.hp = Math.min(this.maxHp(player), player.hp + 1);
+        this.message(player.id, 'You warm your hands at the brazier. Better.');
+        break;
       case 'read':
         this.message(player.id, this.signText(obj));
         break;
@@ -767,6 +788,10 @@ export class Game {
 
     this.broadcastNear(fromX, fromY, fromPlane, 'msg', { text: `${player.name} climbs ${going}.`, channel: 'system' }, player.id);
     this.message(player.id, `You climb ${going} into ${destination.name}.`, 'system');
+    // Nobody should discover they needed a lantern by walking into a wall.
+    if (destination.dark >= 0.5 && this.lightRadius(player) === 0) {
+      this.message(player.id, 'It is very dark down here. A torch or a lantern would help - Bea sells both.');
+    }
     this.send(player.id, 'plane', this.planeInfo(player));
     this.sendState(player);
     recordEvent(player, 'action', `climb_${destination.id}`);
@@ -1824,6 +1849,7 @@ export class Game {
         maxHp: this.maxHp(other),
         anim: other.anim ? other.anim.kind : null,
         chat: other.chat ? other.chat.text : null,
+        light: this.lightRadius(other),
         dead: other.dead
       };
       if (seenVersion !== other.lookVersion) {
@@ -1889,6 +1915,7 @@ export class Game {
         inCombat: player.combat.timer > 0,
         targetId: player.combat.targetId,
         region: regionAt(this.world, player.x, player.y, player.plane).name,
+        light: this.lightRadius(player),
         busy: Boolean(player.action)
       },
       players,

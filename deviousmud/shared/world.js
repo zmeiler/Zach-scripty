@@ -77,7 +77,11 @@ export const OBJECT_TYPES = Object.freeze({
   range: { name: 'Cooking range', blocked: true, art: 'range', action: { id: 'cook', label: 'Cook on', verb: 'open' } },
   fountain: { name: 'Fountain', blocked: true, art: 'fountain', action: { id: 'drink', label: 'Drink from', verb: 'cup your hands in' } },
   signpost: { name: 'Signpost', blocked: true, art: 'sign', action: { id: 'read', label: 'Read', verb: 'squint at' } },
-  campfire: { name: 'Fire', blocked: true, art: 'fire', temporary: true, action: { id: 'cook', label: 'Cook on', verb: 'crouch beside' } },
+  campfire: { name: 'Fire', blocked: true, art: 'fire', temporary: true, light: 4.5, action: { id: 'cook', label: 'Cook on', verb: 'crouch beside' } },
+  brazier: {
+    name: 'Brazier', blocked: true, height: 2, art: 'brazier', light: 6,
+    action: { id: 'warm', label: 'Warm hands at', verb: 'hold your hands out to' }
+  },
 
   // ----------------------------------------------------------------- descent
   // Every one of these carries a `link` on the *instance*: which plane and tile
@@ -598,11 +602,25 @@ function buildMine(world, rng) {
     });
   }
 
-  // A little dressing so the galleries look worked rather than found.
+  // A little dressing so the galleries look worked rather than found, and a
+  // brazier at every landing - whatever else happens, the foot of a ladder is
+  // somewhere you can see.
   for (const { spec } of built) {
     for (const room of Object.values(spec.rooms)) {
       if (rng() < 0.45) addObject(world, 'mine_cart', room.x + 1, room.y + 1, spec.plane);
     }
+    const landing = spec.rooms.landing;
+    addObject(world, 'brazier', landing.x + 1, landing.y + 1, spec.plane);
+    addObject(world, 'brazier', landing.x + landing.w - 2, landing.y + landing.h - 2, spec.plane);
+  }
+
+  // The Ember Chamber is lit for a fight: braziers down the long walls.
+  const chamber = MINE_LEVELS[MINE_LEVELS.length - 1];
+  const hall = chamber.rooms.hall;
+  for (let i = 0; i < 4; i += 1) {
+    const y = hall.y + 3 + Math.floor((i * (hall.h - 6)) / 3);
+    addObject(world, 'brazier', hall.x + 2, y, chamber.plane);
+    addObject(world, 'brazier', hall.x + hall.w - 3, y, chamber.plane);
   }
 }
 
@@ -615,6 +633,21 @@ function regionName(id) {
  * Order-independent-ish checksum used to prove client and server generated the
  * same map. Cheap, and good enough to catch a stale cached build.
  */
+/**
+ * Everything on a plane that gives off light of its own, as
+ * `{ x, y, radius }`. Built once at generation time: static lights never move,
+ * so there is nothing to recompute per frame.
+ */
+export function planeLights(world, plane = SURFACE) {
+  const level = planeAt(world, plane);
+  if (!level.lights) {
+    level.lights = level.objects
+      .filter((obj) => OBJECT_TYPES[obj.type] && OBJECT_TYPES[obj.type].light)
+      .map((obj) => ({ x: obj.x, y: obj.y, radius: OBJECT_TYPES[obj.type].light }));
+  }
+  return level.lights;
+}
+
 export function checksumWorld(world) {
   let h = 2166136261 >>> 0;
   for (const level of world.planes) {

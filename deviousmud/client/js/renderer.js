@@ -12,7 +12,7 @@
  */
 
 import { TILE_SIZE, TILE, BLOCKED_TILES } from '../../shared/constants.js';
-import { OBJECT_TYPES, planeAt } from '../../shared/world.js';
+import { OBJECT_TYPES, planeAt, planeLights } from '../../shared/world.js';
 import { state } from './state.js';
 import { itemSprite, noise2, npcSprite, objectSprite, playerSprite, tileSprite } from './sprites.js';
 import { ISO_TILE_H, ISO_TILE_W, isoProject, isoUnproject } from './iso.js';
@@ -228,10 +228,93 @@ export class Renderer {
     }
 
     this.drawables = drawables;
+    // Darkness sits above the world but below the interface: you cannot see
+    // into the dark, but you can always read your own health bar.
+    this.drawDarkness(now);
     this.drawHover();
     this.drawOverlays(drawables, now);
     this.drawSplats(now);
     this.drawVignette();
+  }
+
+  /**
+   * Underground, the plane is covered by a black sheet and light sources punch
+   * holes in it.
+   *
+   * The sheet is composited on its own canvas because `destination-out` has to
+   * cut through the *shadow*, not through the world already drawn beneath it.
+   * One offscreen canvas is reused for the life of the page.
+   */
+  drawDarkness(now) {
+    const dark = this.level.dark || 0;
+    if (dark <= 0) return;
+
+    if (!this.shadow || this.shadow.width !== Math.ceil(this.cssWidth) || this.shadow.height !== Math.ceil(this.cssHeight)) {
+      this.shadow = document.createElement('canvas');
+      this.shadow.width = Math.ceil(this.cssWidth);
+      this.shadow.height = Math.ceil(this.cssHeight);
+      this.shadowCtx = this.shadow.getContext('2d');
+    }
+    const sctx = this.shadowCtx;
+    sctx.setTransform(1, 0, 0, 1, 0, 0);
+    sctx.globalCompositeOperation = 'source-over';
+    sctx.clearRect(0, 0, this.shadow.width, this.shadow.height);
+    sctx.fillStyle = this.level.ambient || '#05070b';
+    sctx.globalAlpha = dark;
+    sctx.fillRect(0, 0, this.shadow.width, this.shadow.height);
+    sctx.globalAlpha = 1;
+
+    sctx.globalCompositeOperation = 'destination-out';
+    for (const light of this.lights(now)) {
+      const p = this.project(light.x, light.y);
+      // Tiles are wider than they are tall in the isometric view, so a circular
+      // radius in tiles has to be drawn as an ellipse in pixels.
+      const rx = light.radius * (this.isometric ? this.halfW : this.tileSize);
+      const ry = light.radius * (this.isometric ? this.halfH * 1.5 : this.tileSize);
+      const gradient = sctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, rx);
+      gradient.addColorStop(0, 'rgba(0,0,0,1)');
+      gradient.addColorStop(0.55, `rgba(0,0,0,${0.85 * light.strength})`);
+      gradient.addColorStop(1, 'rgba(0,0,0,0)');
+      // Squash the circle about its own centre: the gradient rides the
+      // transform, so it stays aligned with the ellipse it fills.
+      sctx.save();
+      sctx.translate(p.x, p.y);
+      sctx.scale(1, ry / rx);
+      sctx.translate(-p.x, -p.y);
+      sctx.fillStyle = gradient;
+      sctx.beginPath();
+      sctx.arc(p.x, p.y, rx, 0, Math.PI * 2);
+      sctx.fill();
+      sctx.restore();
+    }
+    sctx.globalCompositeOperation = 'source-over';
+
+    this.ctx.drawImage(this.shadow, 0, 0, this.cssWidth, this.cssHeight);
+  }
+
+  /** Every light that could matter this frame, in tile coordinates. */
+  lights(now) {
+    const out = [];
+    // A candle-sized glow around the player even with nothing lit, so being
+    // caught without a torch is difficult rather than impossible.
+    const own = Math.max(1.6, state.self.light || 0);
+    out.push({ x: state.self.x, y: state.self.y, radius: own, strength: 1 });
+
+    for (const player of state.players.values()) {
+      if (player.id === state.playerId || !player.light) continue;
+      out.push({ x: player.renderX ?? player.x, y: player.renderY ?? player.y, radius: player.light, strength: 1 });
+    }
+
+    // Fires flicker; static lights do not.
+    for (const obj of state.dynamicObjects.values()) {
+      const def = OBJECT_TYPES[obj.type];
+      if (!def || !def.light) continue;
+      out.push({ x: obj.x, y: obj.y, radius: def.light * (0.92 + 0.08 * Math.sin(now / 220)), strength: 1 });
+    }
+    for (const light of planeLights(this.world, state.self.plane || 0)) {
+      out.push({ ...light, radius: light.radius * (0.94 + 0.06 * Math.sin(now / 320 + light.x)), strength: 0.92 });
+    }
+    return out;
   }
 
   drawFloors(bounds, now) {

@@ -578,6 +578,55 @@ const PROPS = {
     ctx.ellipse(w * 0.5, baseY + 2, ISO_TILE_W * 0.42, ISO_TILE_H * 0.36, 0, 0, Math.PI * 2);
     ctx.fill();
   },
+  brazier: (ctx, w, h) => {
+    const baseY = h - ISO_TILE_H / 2;
+    propShadow(ctx, w, h, 0.42);
+    // A warm pool on the floor, so the light reads even before the darkness
+    // layer is composited over it.
+    ctx.fillStyle = 'rgba(255,160,70,0.16)';
+    ctx.beginPath();
+    ctx.ellipse(w / 2, baseY, ISO_TILE_W * 0.44, ISO_TILE_H * 0.44, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = shade('#4a4038', FACE.left);
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(w / 2 - 8, baseY);
+    ctx.lineTo(w / 2 - 3, baseY - 20);
+    ctx.moveTo(w / 2 + 8, baseY);
+    ctx.lineTo(w / 2 + 3, baseY - 20);
+    ctx.moveTo(w / 2, baseY + 3);
+    ctx.lineTo(w / 2, baseY - 20);
+    ctx.stroke();
+
+    // Bowl: a shallow ellipse for the rim, a darker one for the inside.
+    ctx.fillStyle = shade('#5a5148', FACE.left);
+    ctx.beginPath();
+    ctx.ellipse(w / 2, baseY - 20, 13, 7, 0, 0, Math.PI);
+    ctx.fill();
+    ctx.fillStyle = shade('#6a6158', FACE.top);
+    ctx.beginPath();
+    ctx.ellipse(w / 2, baseY - 22, 13, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#2b211b';
+    ctx.beginPath();
+    ctx.ellipse(w / 2, baseY - 22, 10, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Flame.
+    ctx.fillStyle = '#e2703a';
+    ctx.beginPath();
+    ctx.moveTo(w / 2, baseY - 46);
+    ctx.quadraticCurveTo(w / 2 + 11, baseY - 30, w / 2, baseY - 21);
+    ctx.quadraticCurveTo(w / 2 - 11, baseY - 30, w / 2, baseY - 46);
+    ctx.fill();
+    ctx.fillStyle = '#ffd166';
+    ctx.beginPath();
+    ctx.moveTo(w / 2, baseY - 39);
+    ctx.quadraticCurveTo(w / 2 + 6, baseY - 29, w / 2, baseY - 22);
+    ctx.quadraticCurveTo(w / 2 - 6, baseY - 29, w / 2, baseY - 39);
+    ctx.fill();
+  },
   mine_cart: (ctx, w, h) => {
     const baseY = h - ISO_TILE_H / 2;
     propShadow(ctx, w, h, 0.44);
@@ -764,7 +813,7 @@ const PROPS = {
 
 /** Height in pixels above the tile footprint for each prop. */
 const PROP_HEIGHTS = {
-  ladder_down: 44, ladder_up: 76, mine_entrance: 72, mine_cart: 40,
+  ladder_down: 44, ladder_up: 76, mine_entrance: 72, mine_cart: 40, brazier: 64,
   tree: 110, oak: 116, willow: 104, stump: 34,
   rock_copper: 56, rock_tin: 56, rock_iron: 56, rock_coal: 56, rock_spent: 56,
   fish_spot: 34, bank: 62, counter: 58, furnace: 96, anvil: 56, range: 66,

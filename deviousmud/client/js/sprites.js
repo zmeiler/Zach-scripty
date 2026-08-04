@@ -211,6 +211,37 @@ const OBJECT_PAINTERS = {
     ctx.fillRect(w * 0.78, h * 0.44, w * 0.1, h * 0.5);
     ctx.fillRect(w * 0.12, h * 0.36, w * 0.76, h * 0.1);
   },
+  brazier: (ctx, w, h) => {
+    // Legs, bowl, flame.
+    ctx.strokeStyle = '#4a4038';
+    ctx.lineWidth = Math.max(2, w * 0.06);
+    ctx.beginPath();
+    ctx.moveTo(w * 0.36, h * 0.94);
+    ctx.lineTo(w * 0.46, h * 0.62);
+    ctx.moveTo(w * 0.64, h * 0.94);
+    ctx.lineTo(w * 0.54, h * 0.62);
+    ctx.stroke();
+    ctx.fillStyle = '#5a5148';
+    ctx.beginPath();
+    ctx.moveTo(w * 0.26, h * 0.5);
+    ctx.lineTo(w * 0.74, h * 0.5);
+    ctx.lineTo(w * 0.62, h * 0.66);
+    ctx.lineTo(w * 0.38, h * 0.66);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#e2703a';
+    ctx.beginPath();
+    ctx.moveTo(w * 0.5, h * 0.2);
+    ctx.quadraticCurveTo(w * 0.72, h * 0.42, w * 0.5, h * 0.52);
+    ctx.quadraticCurveTo(w * 0.28, h * 0.42, w * 0.5, h * 0.2);
+    ctx.fill();
+    ctx.fillStyle = '#ffd166';
+    ctx.beginPath();
+    ctx.moveTo(w * 0.5, h * 0.32);
+    ctx.quadraticCurveTo(w * 0.62, h * 0.44, w * 0.5, h * 0.5);
+    ctx.quadraticCurveTo(w * 0.38, h * 0.44, w * 0.5, h * 0.32);
+    ctx.fill();
+  },
   mine_cart: (ctx, w, h) => {
     ctx.fillStyle = '#5a5148';
     ctx.fillRect(w * 0.18, h * 0.42, w * 0.64, h * 0.34);
@@ -420,7 +451,7 @@ function drawRock(ctx, w, h, oreColour) {
 
 export function objectSprite(art, size) {
   const painter = OBJECT_PAINTERS[art] || OBJECT_PAINTERS.stump;
-  const TALL = ['tree', 'oak', 'willow', 'furnace', 'ladder_up', 'ladder_down', 'mine_entrance'];
+  const TALL = ['tree', 'oak', 'willow', 'furnace', 'ladder_up', 'ladder_down', 'mine_entrance', 'brazier'];
   const height = TALL.includes(art) ? size * 2 : size;
   return cached(`obj:${art}:${size}`, size, height, (ctx, w, h) => painter(ctx, w, h));
 }
@@ -775,6 +806,20 @@ const ICON_PAINTERS = {
     ctx.fillStyle = b; ctx.fillRect(w * 0.36, h * 0.24, w * 0.28, h * 0.08);
     ctx.fillStyle = a; ctx.beginPath(); ctx.ellipse(w * 0.5, h * 0.56, w * 0.2, h * 0.24, 0, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = b; ctx.fillRect(w * 0.34, h * 0.76, w * 0.32, h * 0.08);
+  },
+  torch: (ctx, w, h, [a, b]) => {
+    ctx.fillStyle = a;
+    ctx.fillRect(w * 0.44, h * 0.42, w * 0.12, h * 0.5);
+    ctx.fillStyle = b;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.5, h * 0.1);
+    ctx.quadraticCurveTo(w * 0.74, h * 0.32, w * 0.5, h * 0.46);
+    ctx.quadraticCurveTo(w * 0.26, h * 0.32, w * 0.5, h * 0.1);
+    ctx.fill();
+    ctx.fillStyle = '#fff0b3';
+    ctx.beginPath();
+    ctx.ellipse(w * 0.5, h * 0.32, w * 0.06, h * 0.08, 0, 0, Math.PI * 2);
+    ctx.fill();
   },
   key: (ctx, w, h, [a, b]) => {
     ctx.strokeStyle = a; ctx.lineWidth = 3;

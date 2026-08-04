@@ -1115,7 +1115,11 @@ const OBJECT_TYPES = Object.freeze({
   range: { name: 'Cooking range', blocked: true, art: 'range', action: { id: 'cook', label: 'Cook on', verb: 'open' } },
   fountain: { name: 'Fountain', blocked: true, art: 'fountain', action: { id: 'drink', label: 'Drink from', verb: 'cup your hands in' } },
   signpost: { name: 'Signpost', blocked: true, art: 'sign', action: { id: 'read', label: 'Read', verb: 'squint at' } },
-  campfire: { name: 'Fire', blocked: true, art: 'fire', temporary: true, action: { id: 'cook', label: 'Cook on', verb: 'crouch beside' } },
+  campfire: { name: 'Fire', blocked: true, art: 'fire', temporary: true, light: 4.5, action: { id: 'cook', label: 'Cook on', verb: 'crouch beside' } },
+  brazier: {
+    name: 'Brazier', blocked: true, height: 2, art: 'brazier', light: 6,
+    action: { id: 'warm', label: 'Warm hands at', verb: 'hold your hands out to' }
+  },
 
   // ----------------------------------------------------------------- descent
   // Every one of these carries a `link` on the *instance*: which plane and tile
@@ -1635,11 +1639,25 @@ function buildMine(world, rng) {
     });
   }
 
-  // A little dressing so the galleries look worked rather than found.
+  // A little dressing so the galleries look worked rather than found, and a
+  // brazier at every landing - whatever else happens, the foot of a ladder is
+  // somewhere you can see.
   for (const { spec } of built) {
     for (const room of Object.values(spec.rooms)) {
       if (rng() < 0.45) addObject(world, 'mine_cart', room.x + 1, room.y + 1, spec.plane);
     }
+    const landing = spec.rooms.landing;
+    addObject(world, 'brazier', landing.x + 1, landing.y + 1, spec.plane);
+    addObject(world, 'brazier', landing.x + landing.w - 2, landing.y + landing.h - 2, spec.plane);
+  }
+
+  // The Ember Chamber is lit for a fight: braziers down the long walls.
+  const chamber = MINE_LEVELS[MINE_LEVELS.length - 1];
+  const hall = chamber.rooms.hall;
+  for (let i = 0; i < 4; i += 1) {
+    const y = hall.y + 3 + Math.floor((i * (hall.h - 6)) / 3);
+    addObject(world, 'brazier', hall.x + 2, y, chamber.plane);
+    addObject(world, 'brazier', hall.x + hall.w - 3, y, chamber.plane);
   }
 }
 
@@ -1652,6 +1670,20 @@ function regionName(id) {
  * Order-independent-ish checksum used to prove client and server generated the
  * same map. Cheap, and good enough to catch a stale cached build.
  */
+/**
+ * Everything on a plane that gives off light of its own, as
+ * `{ x, y, radius }`. Built once at generation time: static lights never move,
+ * so there is nothing to recompute per frame.
+ */
+function planeLights(world, plane = SURFACE) {
+  const level = planeAt(world, plane);
+  if (!level.lights) {
+    level.lights = level.objects
+      .filter((obj) => OBJECT_TYPES[obj.type] && OBJECT_TYPES[obj.type].light)
+      .map((obj) => ({ x: obj.x, y: obj.y, radius: OBJECT_TYPES[obj.type].light }));
+  }
+  return level.lights;
+}
 function checksumWorld(world) {
   let h = 2166136261 >>> 0;
   for (const level of world.planes) {
@@ -1709,6 +1741,7 @@ function planeDarkness(world, plane = SURFACE) {
   __exports.REGIONS = REGIONS;
   __exports.buildWorld = buildWorld;
   __exports.planeAt = planeAt;
+  __exports.planeLights = planeLights;
   __exports.checksumWorld = checksumWorld;
   __exports.tileAt = tileAt;
   __exports.objectAt = objectAt;
@@ -2793,6 +2826,23 @@ class Game {
     return player.skills.hitpoints.level;
   }
 
+  /**
+   * How far a player can see in the dark, in tiles. The best light they are
+   * carrying wins - there is no reason to make someone juggle two lanterns.
+   */
+  lightRadius(player) {
+    let best = 0;
+    for (const slot of player.inventory) {
+      const def = slot && getItem(slot.id);
+      if (def && def.light > best) best = def.light;
+    }
+    for (const worn of Object.values(player.equipment)) {
+      const def = worn && getItem(worn.id);
+      if (def && def.light > best) best = def.light;
+    }
+    return best;
+  }
+
   // ----------------------------------------------------------- command entry
 
   /**
@@ -3188,6 +3238,10 @@ class Game {
       case 'climb':
         this.climb(player, obj);
         break;
+      case 'warm':
+        player.hp = Math.min(this.maxHp(player), player.hp + 1);
+        this.message(player.id, 'You warm your hands at the brazier. Better.');
+        break;
       case 'read':
         this.message(player.id, this.signText(obj));
         break;
@@ -3236,6 +3290,10 @@ class Game {
 
     this.broadcastNear(fromX, fromY, fromPlane, 'msg', { text: `${player.name} climbs ${going}.`, channel: 'system' }, player.id);
     this.message(player.id, `You climb ${going} into ${destination.name}.`, 'system');
+    // Nobody should discover they needed a lantern by walking into a wall.
+    if (destination.dark >= 0.5 && this.lightRadius(player) === 0) {
+      this.message(player.id, 'It is very dark down here. A torch or a lantern would help - Bea sells both.');
+    }
     this.send(player.id, 'plane', this.planeInfo(player));
     this.sendState(player);
     recordEvent(player, 'action', `climb_${destination.id}`);
@@ -4293,6 +4351,7 @@ class Game {
         maxHp: this.maxHp(other),
         anim: other.anim ? other.anim.kind : null,
         chat: other.chat ? other.chat.text : null,
+        light: this.lightRadius(other),
         dead: other.dead
       };
       if (seenVersion !== other.lookVersion) {
@@ -4358,6 +4417,7 @@ class Game {
         inCombat: player.combat.timer > 0,
         targetId: player.combat.targetId,
         region: regionAt(this.world, player.x, player.y, player.plane).name,
+        light: this.lightRadius(player),
         busy: Boolean(player.action)
       },
       players,
@@ -4450,7 +4510,9 @@ const RAW_ITEMS = [
   { id: 'small_net', name: 'Small net', examine: 'Good for scooping up shrimp.', value: 10, tool: 'net', power: 1, shape: 'net', palette: ['#e6e6e6', '#9aa0a6'] },
   { id: 'tinderbox', name: 'Tinderbox', examine: 'Makes light work of a pile of logs.', value: 12, tool: 'tinderbox', shape: 'box', palette: ['#8b5a2b', '#f2a03d'] },
   { id: 'hammer', name: 'Hammer', examine: 'Every smith needs one.', value: 14, tool: 'hammer', shape: 'hammer', palette: ['#8b5a2b', '#9aa0a6'] },
-  { id: 'lantern', name: 'Willow\'s lantern', examine: 'A warm little light, safely returned.', value: 0, questItem: true, shape: 'lamp', palette: ['#f6d365', '#7a4a1e'] },
+  { id: 'lantern', name: 'Willow\'s lantern', examine: 'A warm little light, safely returned.', value: 0, questItem: true, light: 6, shape: 'lamp', palette: ['#f6d365', '#7a4a1e'] },
+  { id: 'torch', name: 'Torch', examine: 'Pitch on a stick. It will do.', value: 20, light: 3.5, slot: 'weapon', bonuses: { attack: 1, strength: 1, defence: 0 }, shape: 'torch', palette: ['#8b5a2b', '#f2a03d'] },
+  { id: 'miners_lantern', name: 'Miner\'s lantern', examine: 'Steady light, and it will not blow out.', value: 320, light: 6.5, shape: 'lamp', palette: ['#ffd75e', '#5f6368'] },
   { id: 'lantern_glass', name: 'Lantern glass', examine: 'Cracked, but repairable.', value: 0, questItem: true, shape: 'gem', palette: ['#bfe6ff', '#5fa8d3'] },
   { id: 'wolf_pelt', name: 'Wolf pelt', examine: 'Thick grey fur, shed naturally.', value: 25, shape: 'pelt', palette: ['#9aa0a6', '#5f6368'] },
   { id: 'meadow_flower', name: 'Meadow flower', examine: 'It smells of summer.', value: 4, shape: 'flower', palette: ['#ff8fab', '#5fbf6a'] },
@@ -4577,6 +4639,8 @@ const SHOPS = Object.freeze({
       { id: 'fishing_rod', base: 10 },
       { id: 'small_net', base: 10 },
       { id: 'tinderbox', base: 10 },
+      { id: 'torch', base: 15 },
+      { id: 'miners_lantern', base: 3 },
       { id: 'hammer', base: 10 },
       { id: 'bread', base: 20 },
       { id: 'honey_cake', base: 5 },
@@ -6069,7 +6133,7 @@ __modules["client/js/renderer.js"] = function (__exports, __require) {
  * movement looks continuous without the client ever predicting the future.
  */
 const { TILE_SIZE, TILE, BLOCKED_TILES } = __require("shared/constants.js");
-const { OBJECT_TYPES, planeAt } = __require("shared/world.js");
+const { OBJECT_TYPES, planeAt, planeLights } = __require("shared/world.js");
 const { state } = __require("client/js/state.js");
 const { itemSprite, noise2, npcSprite, objectSprite, playerSprite, tileSprite } = __require("client/js/sprites.js");
 const { ISO_TILE_H, ISO_TILE_W, isoProject, isoUnproject } = __require("client/js/iso.js");
@@ -6283,10 +6347,93 @@ class Renderer {
     }
 
     this.drawables = drawables;
+    // Darkness sits above the world but below the interface: you cannot see
+    // into the dark, but you can always read your own health bar.
+    this.drawDarkness(now);
     this.drawHover();
     this.drawOverlays(drawables, now);
     this.drawSplats(now);
     this.drawVignette();
+  }
+
+  /**
+   * Underground, the plane is covered by a black sheet and light sources punch
+   * holes in it.
+   *
+   * The sheet is composited on its own canvas because `destination-out` has to
+   * cut through the *shadow*, not through the world already drawn beneath it.
+   * One offscreen canvas is reused for the life of the page.
+   */
+  drawDarkness(now) {
+    const dark = this.level.dark || 0;
+    if (dark <= 0) return;
+
+    if (!this.shadow || this.shadow.width !== Math.ceil(this.cssWidth) || this.shadow.height !== Math.ceil(this.cssHeight)) {
+      this.shadow = document.createElement('canvas');
+      this.shadow.width = Math.ceil(this.cssWidth);
+      this.shadow.height = Math.ceil(this.cssHeight);
+      this.shadowCtx = this.shadow.getContext('2d');
+    }
+    const sctx = this.shadowCtx;
+    sctx.setTransform(1, 0, 0, 1, 0, 0);
+    sctx.globalCompositeOperation = 'source-over';
+    sctx.clearRect(0, 0, this.shadow.width, this.shadow.height);
+    sctx.fillStyle = this.level.ambient || '#05070b';
+    sctx.globalAlpha = dark;
+    sctx.fillRect(0, 0, this.shadow.width, this.shadow.height);
+    sctx.globalAlpha = 1;
+
+    sctx.globalCompositeOperation = 'destination-out';
+    for (const light of this.lights(now)) {
+      const p = this.project(light.x, light.y);
+      // Tiles are wider than they are tall in the isometric view, so a circular
+      // radius in tiles has to be drawn as an ellipse in pixels.
+      const rx = light.radius * (this.isometric ? this.halfW : this.tileSize);
+      const ry = light.radius * (this.isometric ? this.halfH * 1.5 : this.tileSize);
+      const gradient = sctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, rx);
+      gradient.addColorStop(0, 'rgba(0,0,0,1)');
+      gradient.addColorStop(0.55, `rgba(0,0,0,${0.85 * light.strength})`);
+      gradient.addColorStop(1, 'rgba(0,0,0,0)');
+      // Squash the circle about its own centre: the gradient rides the
+      // transform, so it stays aligned with the ellipse it fills.
+      sctx.save();
+      sctx.translate(p.x, p.y);
+      sctx.scale(1, ry / rx);
+      sctx.translate(-p.x, -p.y);
+      sctx.fillStyle = gradient;
+      sctx.beginPath();
+      sctx.arc(p.x, p.y, rx, 0, Math.PI * 2);
+      sctx.fill();
+      sctx.restore();
+    }
+    sctx.globalCompositeOperation = 'source-over';
+
+    this.ctx.drawImage(this.shadow, 0, 0, this.cssWidth, this.cssHeight);
+  }
+
+  /** Every light that could matter this frame, in tile coordinates. */
+  lights(now) {
+    const out = [];
+    // A candle-sized glow around the player even with nothing lit, so being
+    // caught without a torch is difficult rather than impossible.
+    const own = Math.max(1.6, state.self.light || 0);
+    out.push({ x: state.self.x, y: state.self.y, radius: own, strength: 1 });
+
+    for (const player of state.players.values()) {
+      if (player.id === state.playerId || !player.light) continue;
+      out.push({ x: player.renderX ?? player.x, y: player.renderY ?? player.y, radius: player.light, strength: 1 });
+    }
+
+    // Fires flicker; static lights do not.
+    for (const obj of state.dynamicObjects.values()) {
+      const def = OBJECT_TYPES[obj.type];
+      if (!def || !def.light) continue;
+      out.push({ x: obj.x, y: obj.y, radius: def.light * (0.92 + 0.08 * Math.sin(now / 220)), strength: 1 });
+    }
+    for (const light of planeLights(this.world, state.self.plane || 0)) {
+      out.push({ ...light, radius: light.radius * (0.94 + 0.06 * Math.sin(now / 320 + light.x)), strength: 0.92 });
+    }
+    return out;
   }
 
   drawFloors(bounds, now) {
@@ -7084,6 +7231,37 @@ const OBJECT_PAINTERS = {
     ctx.fillRect(w * 0.78, h * 0.44, w * 0.1, h * 0.5);
     ctx.fillRect(w * 0.12, h * 0.36, w * 0.76, h * 0.1);
   },
+  brazier: (ctx, w, h) => {
+    // Legs, bowl, flame.
+    ctx.strokeStyle = '#4a4038';
+    ctx.lineWidth = Math.max(2, w * 0.06);
+    ctx.beginPath();
+    ctx.moveTo(w * 0.36, h * 0.94);
+    ctx.lineTo(w * 0.46, h * 0.62);
+    ctx.moveTo(w * 0.64, h * 0.94);
+    ctx.lineTo(w * 0.54, h * 0.62);
+    ctx.stroke();
+    ctx.fillStyle = '#5a5148';
+    ctx.beginPath();
+    ctx.moveTo(w * 0.26, h * 0.5);
+    ctx.lineTo(w * 0.74, h * 0.5);
+    ctx.lineTo(w * 0.62, h * 0.66);
+    ctx.lineTo(w * 0.38, h * 0.66);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#e2703a';
+    ctx.beginPath();
+    ctx.moveTo(w * 0.5, h * 0.2);
+    ctx.quadraticCurveTo(w * 0.72, h * 0.42, w * 0.5, h * 0.52);
+    ctx.quadraticCurveTo(w * 0.28, h * 0.42, w * 0.5, h * 0.2);
+    ctx.fill();
+    ctx.fillStyle = '#ffd166';
+    ctx.beginPath();
+    ctx.moveTo(w * 0.5, h * 0.32);
+    ctx.quadraticCurveTo(w * 0.62, h * 0.44, w * 0.5, h * 0.5);
+    ctx.quadraticCurveTo(w * 0.38, h * 0.44, w * 0.5, h * 0.32);
+    ctx.fill();
+  },
   mine_cart: (ctx, w, h) => {
     ctx.fillStyle = '#5a5148';
     ctx.fillRect(w * 0.18, h * 0.42, w * 0.64, h * 0.34);
@@ -7292,7 +7470,7 @@ function drawRock(ctx, w, h, oreColour) {
 }
 function objectSprite(art, size) {
   const painter = OBJECT_PAINTERS[art] || OBJECT_PAINTERS.stump;
-  const TALL = ['tree', 'oak', 'willow', 'furnace', 'ladder_up', 'ladder_down', 'mine_entrance'];
+  const TALL = ['tree', 'oak', 'willow', 'furnace', 'ladder_up', 'ladder_down', 'mine_entrance', 'brazier'];
   const height = TALL.includes(art) ? size * 2 : size;
   return cached(`obj:${art}:${size}`, size, height, (ctx, w, h) => painter(ctx, w, h));
 }
@@ -7645,6 +7823,20 @@ const ICON_PAINTERS = {
     ctx.fillStyle = b; ctx.fillRect(w * 0.36, h * 0.24, w * 0.28, h * 0.08);
     ctx.fillStyle = a; ctx.beginPath(); ctx.ellipse(w * 0.5, h * 0.56, w * 0.2, h * 0.24, 0, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = b; ctx.fillRect(w * 0.34, h * 0.76, w * 0.32, h * 0.08);
+  },
+  torch: (ctx, w, h, [a, b]) => {
+    ctx.fillStyle = a;
+    ctx.fillRect(w * 0.44, h * 0.42, w * 0.12, h * 0.5);
+    ctx.fillStyle = b;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.5, h * 0.1);
+    ctx.quadraticCurveTo(w * 0.74, h * 0.32, w * 0.5, h * 0.46);
+    ctx.quadraticCurveTo(w * 0.26, h * 0.32, w * 0.5, h * 0.1);
+    ctx.fill();
+    ctx.fillStyle = '#fff0b3';
+    ctx.beginPath();
+    ctx.ellipse(w * 0.5, h * 0.32, w * 0.06, h * 0.08, 0, 0, Math.PI * 2);
+    ctx.fill();
   },
   key: (ctx, w, h, [a, b]) => {
     ctx.strokeStyle = a; ctx.lineWidth = 3;
@@ -8368,6 +8560,55 @@ const PROPS = {
     ctx.ellipse(w * 0.5, baseY + 2, ISO_TILE_W * 0.42, ISO_TILE_H * 0.36, 0, 0, Math.PI * 2);
     ctx.fill();
   },
+  brazier: (ctx, w, h) => {
+    const baseY = h - ISO_TILE_H / 2;
+    propShadow(ctx, w, h, 0.42);
+    // A warm pool on the floor, so the light reads even before the darkness
+    // layer is composited over it.
+    ctx.fillStyle = 'rgba(255,160,70,0.16)';
+    ctx.beginPath();
+    ctx.ellipse(w / 2, baseY, ISO_TILE_W * 0.44, ISO_TILE_H * 0.44, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = shade('#4a4038', FACE.left);
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(w / 2 - 8, baseY);
+    ctx.lineTo(w / 2 - 3, baseY - 20);
+    ctx.moveTo(w / 2 + 8, baseY);
+    ctx.lineTo(w / 2 + 3, baseY - 20);
+    ctx.moveTo(w / 2, baseY + 3);
+    ctx.lineTo(w / 2, baseY - 20);
+    ctx.stroke();
+
+    // Bowl: a shallow ellipse for the rim, a darker one for the inside.
+    ctx.fillStyle = shade('#5a5148', FACE.left);
+    ctx.beginPath();
+    ctx.ellipse(w / 2, baseY - 20, 13, 7, 0, 0, Math.PI);
+    ctx.fill();
+    ctx.fillStyle = shade('#6a6158', FACE.top);
+    ctx.beginPath();
+    ctx.ellipse(w / 2, baseY - 22, 13, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#2b211b';
+    ctx.beginPath();
+    ctx.ellipse(w / 2, baseY - 22, 10, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Flame.
+    ctx.fillStyle = '#e2703a';
+    ctx.beginPath();
+    ctx.moveTo(w / 2, baseY - 46);
+    ctx.quadraticCurveTo(w / 2 + 11, baseY - 30, w / 2, baseY - 21);
+    ctx.quadraticCurveTo(w / 2 - 11, baseY - 30, w / 2, baseY - 46);
+    ctx.fill();
+    ctx.fillStyle = '#ffd166';
+    ctx.beginPath();
+    ctx.moveTo(w / 2, baseY - 39);
+    ctx.quadraticCurveTo(w / 2 + 6, baseY - 29, w / 2, baseY - 22);
+    ctx.quadraticCurveTo(w / 2 - 6, baseY - 29, w / 2, baseY - 39);
+    ctx.fill();
+  },
   mine_cart: (ctx, w, h) => {
     const baseY = h - ISO_TILE_H / 2;
     propShadow(ctx, w, h, 0.44);
@@ -8554,7 +8795,7 @@ const PROPS = {
 
 /** Height in pixels above the tile footprint for each prop. */
 const PROP_HEIGHTS = {
-  ladder_down: 44, ladder_up: 76, mine_entrance: 72, mine_cart: 40,
+  ladder_down: 44, ladder_up: 76, mine_entrance: 72, mine_cart: 40, brazier: 64,
   tree: 110, oak: 116, willow: 104, stump: 34,
   rock_copper: 56, rock_tin: 56, rock_iron: 56, rock_coal: 56, rock_spent: 56,
   fish_spot: 34, bank: 62, counter: 58, furnace: 96, anvil: 56, range: 66,
@@ -8863,7 +9104,7 @@ __modules["client/js/input.js"] = function (__exports, __require) {
  * action, a right click or long press opens the full action menu.
  */
 const { actions } = __require("client/js/actions.js");
-const { state } = __require("client/js/state.js");
+const { bus, state } = __require("client/js/state.js");
 const { closeMenu, isMenuOpen, openMenu, worldActions } = __require("client/js/ui/menu.js");
 const { focusChat, isChatFocused } = __require("client/js/ui/chat.js");
 const { showPanel } = __require("client/js/ui/panels.js");
@@ -8914,6 +9155,10 @@ function initInput({ canvas, renderer, minimap, minimapCanvas }) {
     renderer.hoverTile = null;
     hint('');
   });
+
+  // Changing plane teleports the world out from under the cursor, so whatever
+  // the hint was describing is no longer there to describe.
+  bus.on('plane', () => hint(''));
 
   canvas.addEventListener('pointerup', (event) => {
     clearTimeout(longPressTimer);

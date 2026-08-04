@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 
 import { Game } from '../shared/engine/game.js';
 import { findPath } from '../shared/engine/pathfinding.js';
-import { buildWorld, checksumWorld, isWalkable, makeRng, planeAt, objectAt, regionAt } from '../shared/world.js';
+import { buildWorld, checksumWorld, isWalkable, makeRng, planeAt, planeDarkness, planeLights, objectAt, regionAt } from '../shared/world.js';
 import { PLANE_COUNT, SPAWN_POINT, SURFACE, TILE, VIEW_RADIUS } from '../shared/constants.js';
 
 function newGame() {
@@ -341,6 +341,78 @@ test('the checksum notices a change on any plane, not just the surface', () => {
   const deep = planeAt(same, 3);
   deep.tiles[50 * same.width + 50] = deep.tiles[50 * same.width + 50] === TILE.EMBER ? TILE.CRYSTAL : TILE.EMBER;
   assert.notEqual(world.checksum, checksumWorld(same));
+});
+
+// ------------------------------------------------------------------- light
+
+test('the best light you are carrying is the one that counts', () => {
+  const game = newGame();
+  const player = game.addPlayer('p1', { name: 'Digger' });
+  assert.equal(game.lightRadius(player), 0, 'a starter kit has nothing that glows');
+
+  player.inventory[0] = { id: 'torch', count: 1 };
+  const torch = game.lightRadius(player);
+  assert.ok(torch > 0);
+
+  // A better light in the bag wins over a worse one in hand, and vice versa.
+  player.inventory[1] = { id: 'miners_lantern', count: 1 };
+  assert.ok(game.lightRadius(player) > torch);
+
+  player.inventory[1] = null;
+  player.equipment.weapon = { id: 'torch', count: 1 };
+  player.inventory[0] = null;
+  assert.equal(game.lightRadius(player), torch, 'a worn torch lights the same as a carried one');
+});
+
+test('planes carry their own darkness, and the surface has none', () => {
+  const world = buildWorld();
+  assert.equal(planeDarkness(world, SURFACE), 0);
+  assert.ok(planeDarkness(world, 1) > 0);
+  assert.ok(planeDarkness(world, 2) > planeDarkness(world, 1), 'deeper is darker');
+});
+
+test('every landing has a light burning at it', () => {
+  const world = buildWorld();
+  for (let plane = 1; plane < PLANE_COUNT; plane += 1) {
+    const lights = planeLights(world, plane);
+    assert.ok(lights.length > 0, `plane ${plane} needs at least one lit spot`);
+    const ladder = ladderOn(world, plane, 'ladder_up');
+    const nearest = Math.min(...lights.map((l) => Math.max(Math.abs(l.x - ladder.x), Math.abs(l.y - ladder.y))));
+    assert.ok(nearest <= 6, `the foot of the ladder on plane ${plane} is unlit`);
+  }
+});
+
+test('walking into the dark without a light says so', () => {
+  const game = newGame();
+  const player = game.addPlayer('p1', { name: 'Digger' });
+  game.drain();
+  game.climb(player, game.world.mineEntrance);
+  const said = game.drain().filter((entry) => entry.msg.t === 'msg').map((entry) => entry.msg.text);
+  assert.ok(said.some((text) => /dark down here/.test(text)), 'the player should be warned');
+
+  // With a lantern, no warning.
+  player.inventory[0] = { id: 'miners_lantern', count: 1 };
+  game.drain();
+  game.climb(player, ladderOn(game.world, 1, 'ladder_up'));
+  game.climb(player, game.world.mineEntrance);
+  const quiet = game.drain().filter((entry) => entry.msg.t === 'msg').map((entry) => entry.msg.text);
+  assert.equal(quiet.some((text) => /dark down here/.test(text)), false);
+});
+
+test('the state message tells the client how far everyone can see', () => {
+  const game = newGame();
+  const player = game.addPlayer('p1', { name: 'Digger' });
+  const friend = game.addPlayer('p2', { name: 'Friend' });
+  friend.x = player.x + 1;
+  friend.y = player.y;
+  friend.inventory[0] = { id: 'torch', count: 1 };
+
+  game.drain();
+  game.tick();
+  const view = game.drain().find((entry) => entry.to === 'p1' && entry.msg.t === 'state').msg;
+  assert.equal(view.self.light, 0);
+  const other = view.players.find((entry) => entry.id === 'p2');
+  assert.ok(other.light > 0, 'a friend carrying a torch lights the way for you too');
 });
 
 test('view radius still bounds what you receive on a mine level', () => {
