@@ -477,21 +477,25 @@ export class Renderer {
     let y;
     let flip = false;
 
+    // Most creatures are person-sized; a few are not, and how large one is
+    // drawn is the only warning a player gets before they click on it.
+    const bulk = entity.size || 1;
+
     if (iso) {
       const facing = isoFacing(entity.dir);
       flip = facing.flip;
       sprite = isPlayer
         ? isoPlayerSprite(entity.appearance || state.appearance, entity.look, frame, facing.view)
         : isoNpcSprite(entity.art, frame, facing.view);
-      w = ISO_CHAR_W * this.scale;
-      h = ISO_CHAR_H * this.scale;
+      w = ISO_CHAR_W * this.scale * bulk;
+      h = ISO_CHAR_H * this.scale * bulk;
       x = Math.round(p.x - w / 2);
       y = Math.round(p.y + this.halfH * 0.55 - h);
     } else {
       sprite = isPlayer
         ? playerSprite(entity.appearance || state.appearance, entity.look, frame, 32)
         : npcSprite(entity.art, frame, 32);
-      w = this.tileSize * 1.15;
+      w = this.tileSize * 1.15 * bulk;
       h = w * 1.5;
       x = Math.round(p.x - w / 2);
       y = Math.round(p.y - this.tileSize * 0.5 - h + this.tileSize);

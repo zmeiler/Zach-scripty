@@ -6,6 +6,8 @@
  * anything a parent would mind reading over a shoulder.
  */
 
+import { mineRoom } from './world.js';
+
 export const NPC_TYPES = Object.freeze({
   // ------------------------------------------------------------- townsfolk
   mayor_aldric: {
@@ -93,6 +95,124 @@ export const NPC_TYPES = Object.freeze({
       { id: 'coins', min: 5, max: 30, chance: 0.8 },
       { id: 'meadow_flower', chance: 0.3 }
     ]
+  },
+
+  // ------------------------------------------------- Copper Hollow Mine (1)
+  cave_bat: {
+    name: 'Cave bat', art: 'bat', examine: 'It would rather you turned the light off.',
+    level: 7, hp: 16, maxHit: 2, attack: 7, defence: 5, aggressive: false, respawn: 28,
+    drops: [
+      { id: 'coins', min: 4, max: 26, chance: 0.8 },
+      { id: 'bat_wing', chance: 0.45 }
+    ]
+  },
+  tunnel_crawler: {
+    name: 'Tunnel crawler', art: 'crawler', examine: 'Many legs, no manners.',
+    level: 12, hp: 28, maxHit: 4, attack: 12, defence: 9, aggressive: false, respawn: 34,
+    drops: [
+      { id: 'coins', min: 8, max: 48, chance: 0.85 },
+      { id: 'copper_ore', min: 1, max: 3, chance: 0.3 },
+      { id: 'tin_ore', min: 1, max: 3, chance: 0.3 }
+    ]
+  },
+  dust_sprite: {
+    name: 'Dust sprite', art: 'sprite', examine: 'A small cloud with opinions.',
+    level: 17, hp: 34, maxHit: 5, attack: 17, defence: 12, aggressive: true, respawn: 42,
+    drops: [
+      { id: 'coins', min: 15, max: 80, chance: 0.9 },
+      { id: 'iron_ore', min: 1, max: 3, chance: 0.35 },
+      { id: 'torch', chance: 0.14 }
+    ]
+  },
+
+  // ----------------------------------------------------- The Deep Seam (2)
+  coal_lurker: {
+    name: 'Coal lurker', art: 'lurker', examine: 'It hides in the coal and hopes.',
+    level: 25, hp: 54, maxHit: 7, attack: 25, defence: 18, aggressive: false, respawn: 48,
+    drops: [
+      { id: 'coins', min: 25, max: 140, chance: 0.9 },
+      { id: 'coal', min: 2, max: 6, chance: 0.6 },
+      { id: 'iron_ore', min: 1, max: 4, chance: 0.3 }
+    ]
+  },
+  shale_hound: {
+    name: 'Shale hound', art: 'hound', examine: 'Grey, quick, and made mostly of slate.',
+    level: 31, hp: 68, maxHit: 9, attack: 31, defence: 22, aggressive: true, respawn: 54,
+    drops: [
+      { id: 'coins', min: 40, max: 210, chance: 0.92 },
+      { id: 'coal', min: 2, max: 8, chance: 0.55 },
+      { id: 'mithril_ore', chance: 0.12 },
+      { id: 'miners_boots', chance: 0.05 }
+    ]
+  },
+  deep_golem: {
+    name: 'Deep golem', art: 'deep_golem', examine: 'A rock golem that never saw the sun.',
+    level: 37, hp: 88, maxHit: 11, attack: 37, defence: 30, aggressive: true, respawn: 66, size: 1.15,
+    drops: [
+      { id: 'coins', min: 70, max: 320, chance: 0.94 },
+      { id: 'mithril_ore', min: 1, max: 3, chance: 0.35 },
+      { id: 'coal', min: 3, max: 9, chance: 0.5 },
+      { id: 'mithril_bar', chance: 0.1 }
+    ]
+  },
+  crystal_beetle: {
+    name: 'Crystal beetle', art: 'beetle', examine: 'Its shell chimes when it walks.',
+    level: 41, hp: 82, maxHit: 10, attack: 41, defence: 32, aggressive: false, respawn: 70,
+    drops: [
+      { id: 'coins', min: 80, max: 360, chance: 0.94 },
+      { id: 'crystal_shard', chance: 0.5 },
+      { id: 'mithril_bar', chance: 0.16 },
+      { id: 'mithril_helm', chance: 0.04 }
+    ]
+  },
+
+  // -------------------------------------------------- The Ember Chamber (3)
+  ember_wisp: {
+    name: 'Ember wisp', art: 'wisp', examine: 'A spark that got away from the fire.',
+    level: 30, hp: 42, maxHit: 7, attack: 33, defence: 16, aggressive: true, respawn: 40,
+    drops: [
+      { id: 'coins', min: 30, max: 160, chance: 0.85 },
+      { id: 'ember_shard', chance: 0.2 }
+    ]
+  },
+  cinder_guardian: {
+    name: 'Cinder guardian', art: 'guardian_statue', examine: 'It has stood here a very long time.',
+    level: 53, hp: 105, maxHit: 12, attack: 53, defence: 40, aggressive: true, respawn: 90, size: 1.3,
+    drops: [
+      { id: 'coins', min: 150, max: 620, chance: 0.96 },
+      { id: 'ember_shard', chance: 0.4 },
+      { id: 'adamant_ore', min: 1, max: 2, chance: 0.25 },
+      { id: 'adamant_bar', chance: 0.08 }
+    ]
+  },
+
+  /**
+   * Cinderheart, the whole point of the descent.
+   *
+   * It is not a monster so much as a very large, very warm creature having a
+   * bad dream: defeat it and it yawns, banks its fire and goes back to sleep.
+   * Mechanically it is the only NPC with phases - at two thirds and one third
+   * health it wakes further, calls wisps to it, and finally stokes itself.
+   */
+  cinderheart: {
+    name: 'Cinderheart', art: 'cinderheart', examine: 'Enormous, warm, and fast asleep. Mostly.', proper: true,
+    level: 72, hp: 190, maxHit: 15, attack: 70, defence: 44, aggressive: true, respawn: 300,
+    wander: 0, leash: 16, size: 2.4,
+    boss: {
+      summon: 'ember_wisp',
+      phases: [
+        { at: 0.66, summon: 2, say: 'Cinderheart stirs, and sparks scatter from its back.' },
+        { at: 0.33, summon: 3, enrage: true, say: 'Cinderheart sits up properly. The whole chamber glows.' }
+      ]
+    },
+    drops: [
+      { id: 'coins', min: 800, max: 2600, chance: 1 },
+      { id: 'adamant_bar', min: 2, max: 5, chance: 0.9 },
+      { id: 'ember_shard', min: 2, max: 4, chance: 0.8 },
+      { id: 'cinder_cape', chance: 0.4 },
+      { id: 'ember_heart', chance: 0.3 },
+      { id: 'emberforged_blade', chance: 0.28 }
+    ]
   }
 });
 
@@ -123,8 +243,65 @@ export const NPC_SPAWNS = Object.freeze([
 
   // Copper Hollow
   ...gridSpawns('cave_imp', 11, 38, 3, 2, 7),
-  ...gridSpawns('rock_golem', 10, 58, 2, 2, 7)
+  ...gridSpawns('rock_golem', 10, 58, 2, 2, 7),
+
+  // --------------------------------------------------------------- the mine
+  // Spawns are addressed by room, so moving a gallery in the floor plan moves
+  // whatever lives in it. Every level ramps upwards away from its ladder.
+  ...roomSpawns(1, 'copper', 'cave_bat', 3),
+  ...roomSpawns(1, 'tin', 'cave_bat', 2),
+  ...roomSpawns(1, 'gallery', 'tunnel_crawler', 3),
+  ...roomSpawns(1, 'iron', 'tunnel_crawler', 2),
+  ...roomSpawns(1, 'coal', 'dust_sprite', 3),
+  ...roomSpawns(1, 'hollow', 'dust_sprite', 2),
+  ...roomSpawns(1, 'descent', 'cave_imp', 2),
+
+  ...roomSpawns(2, 'crossing', 'coal_lurker', 3),
+  ...roomSpawns(2, 'seam', 'coal_lurker', 2),
+  ...roomSpawns(2, 'fungus', 'shale_hound', 3),
+  ...roomSpawns(2, 'hall', 'shale_hound', 2),
+  ...roomSpawns(2, 'coalface', 'deep_golem', 3),
+  ...roomSpawns(2, 'vault', 'crystal_beetle', 3),
+  ...roomSpawns(2, 'descent', 'deep_golem', 2),
+
+  ...roomSpawns(3, 'approach', 'ember_wisp', 3),
+  ...roomSpawns(3, 'hall', 'cinder_guardian', 4),
+  ...bossSpawn(3, 'hall', 'cinderheart')
 ]);
+
+/**
+ * Spreads `count` creatures evenly across a named mine room, each wandering
+ * inside that room rather than inside a fixed square drawn around itself: a
+ * gallery is the right size for a patrol, and nothing wanders into rock.
+ */
+function roomSpawns(plane, roomId, type, count) {
+  const room = mineRoom(plane, roomId);
+  if (!room) return [];
+  const area = { x: room.x + 1, y: room.y + 1, w: Math.max(1, room.w - 2), h: Math.max(1, room.h - 2) };
+  const out = [];
+  for (let i = 0; i < count; i += 1) {
+    // Golden-ratio stepping scatters them without clumping or lining up.
+    const fx = (i * 0.618033988749895) % 1;
+    const fy = (i * 0.381966011250105 + 0.27) % 1;
+    out.push({
+      type,
+      plane,
+      x: area.x + Math.floor(fx * area.w),
+      y: area.y + Math.floor(fy * area.h),
+      area
+    });
+  }
+  return out;
+}
+
+/** One boss, in the middle of its hall, patrolling nothing. */
+function bossSpawn(plane, roomId, type) {
+  const room = mineRoom(plane, roomId);
+  if (!room) return [];
+  const x = room.x + Math.floor(room.w / 2);
+  const y = room.y + Math.floor(room.h / 2);
+  return [{ type, plane, x, y, area: { x, y, w: 1, h: 1 } }];
+}
 
 function gridSpawns(type, x0, y0, cols, rows, spacing) {
   const out = [];
@@ -140,4 +317,14 @@ function gridSpawns(type, x0, y0, cols, rows, spacing) {
 
 export function npcDef(type) {
   return NPC_TYPES[type] || null;
+}
+
+/**
+ * How to refer to a creature in a sentence. Most are things ("the giant rat");
+ * a few have names ("Cinderheart"), and putting "the" in front of a name reads
+ * like a mistake.
+ */
+export function creatureName(def) {
+  if (!def) return 'something';
+  return def.proper ? def.name : `the ${def.name.toLowerCase()}`;
 }

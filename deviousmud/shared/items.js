@@ -45,6 +45,13 @@ const RAW_ITEMS = [
   { id: 'bronze_bar', name: 'Bronze bar', examine: 'Copper and tin, married by fire.', value: 30, shape: 'bar', palette: ['#b87333', '#8a5a2b'] },
   { id: 'iron_bar', name: 'Iron bar', examine: 'Ready for the anvil.', value: 70, shape: 'bar', palette: ['#9aa0a6', '#5f6368'] },
   { id: 'steel_bar', name: 'Steel bar', examine: 'Iron, improved by coal.', value: 150, shape: 'bar', palette: ['#cfd8dc', '#78909c'] },
+  { id: 'mithril_ore', name: 'Mithril ore', examine: 'Blue-green, and lighter than it looks.', value: 90, shape: 'ore', palette: ['#5c7cbf', '#33487a'] },
+  { id: 'mithril_bar', name: 'Mithril bar', examine: 'Rings like a bell when you tap it.', value: 320, shape: 'bar', palette: ['#7d9adf', '#43598f'] },
+  { id: 'adamant_ore', name: 'Adamant ore', examine: 'Dark green, and very heavy indeed.', value: 210, shape: 'ore', palette: ['#3f7a52', '#22452f'] },
+  { id: 'adamant_bar', name: 'Adamant bar', examine: 'It took the furnace a long while.', value: 760, shape: 'bar', palette: ['#4f9166', '#2c5a3d'] },
+  { id: 'ember_shard', name: 'Ember shard', examine: 'Still warm. It will not go out.', value: 400, shape: 'gem', palette: ['#ff8a3d', '#a83c12'] },
+  { id: 'bat_wing', name: 'Bat wing', examine: 'Leathery, and shed naturally.', value: 12, shape: 'pelt', palette: ['#6b5a72', '#3d3242'] },
+  { id: 'crystal_shard', name: 'Crystal shard', examine: 'It hums if you hold it still.', value: 140, shape: 'gem', palette: ['#c9a0ff', '#6c4d99'] },
 
   // --------------------------------------------------------------------- food
   { id: 'raw_shrimp', name: 'Raw shrimp', examine: 'Best not eaten like this.', value: 3, shape: 'fish', palette: ['#ffb3a7', '#d97b6c'] },
@@ -63,6 +70,9 @@ const RAW_ITEMS = [
   { id: 'iron_sword', name: 'Iron sword', examine: 'Noticeably heavier.', value: 160, slot: 'weapon', bonuses: { attack: 12, strength: 12, defence: 1 }, requires: { attack: 5 }, shape: 'sword', palette: ['#9aa0a6', '#5f6368'] },
   { id: 'steel_sword', name: 'Steel sword', examine: 'Balanced and bright.', value: 420, slot: 'weapon', bonuses: { attack: 20, strength: 19, defence: 2 }, requires: { attack: 10 }, shape: 'sword', palette: ['#cfd8dc', '#78909c'] },
   { id: 'guardian_blade', name: 'Guardian blade', examine: 'Awarded to defenders of Emberfall.', value: 900, slot: 'weapon', bonuses: { attack: 26, strength: 24, defence: 4 }, requires: { attack: 15 }, shape: 'sword', palette: ['#ffd75e', '#b8860b'] },
+  { id: 'mithril_sword', name: 'Mithril sword', examine: 'Light in the hand, and very sharp.', value: 900, slot: 'weapon', bonuses: { attack: 30, strength: 28, defence: 3 }, requires: { attack: 20 }, shape: 'sword', palette: ['#7d9adf', '#43598f'] },
+  { id: 'adamant_sword', name: 'Adamant sword', examine: 'Heavier than steel, and worth it.', value: 2200, slot: 'weapon', bonuses: { attack: 42, strength: 40, defence: 4 }, requires: { attack: 30 }, shape: 'sword', palette: ['#4f9166', '#2c5a3d'] },
+  { id: 'emberforged_blade', name: 'Emberforged blade', examine: 'Forged in Cinderheart\'s own coals.', value: 6000, slot: 'weapon', bonuses: { attack: 58, strength: 55, defence: 6 }, requires: { attack: 40 }, shape: 'sword', palette: ['#ff8a3d', '#a83c12'] },
 
   // ------------------------------------------------------------------- armour
   { id: 'wooden_shield', name: 'Wooden shield', examine: 'Better than nothing.', value: 20, slot: 'shield', bonuses: { attack: 0, strength: 0, defence: 4 }, shape: 'shield', palette: ['#8b5a2b', '#5c3a1a'] },
@@ -80,6 +90,21 @@ const RAW_ITEMS = [
   { id: 'travellers_cape', name: 'Traveller\'s cape', examine: 'Emberfall green.', value: 50, slot: 'cape', bonuses: { attack: 0, strength: 1, defence: 3 }, shape: 'cape', palette: ['#4caf50', '#2e7d32'] },
   { id: 'copper_amulet', name: 'Copper amulet', examine: 'A miner\'s good-luck charm.', value: 90, slot: 'amulet', bonuses: { attack: 3, strength: 2, defence: 1 }, shape: 'amulet', palette: ['#b87333', '#ffd75e'] },
   { id: 'ring_of_tides', name: 'Ring of tides', examine: 'Cool to the touch.', value: 250, slot: 'ring', bonuses: { attack: 2, strength: 2, defence: 2 }, shape: 'ring', palette: ['#5fa8d3', '#bfe6ff'] },
+
+  // ------------------------------------------------- mithril and adamant
+  { id: 'mithril_pickaxe', name: 'Mithril pickaxe', examine: 'Bites through rock like bread.', value: 640, tool: 'pickaxe', power: 3, slot: 'weapon', bonuses: { attack: 9, strength: 10, defence: 0 }, requires: { attack: 20 }, shape: 'pickaxe', palette: ['#7d9adf', '#43598f'] },
+  { id: 'mithril_axe', name: 'Mithril axe', examine: 'Barely notices an oak.', value: 620, tool: 'axe', power: 3, slot: 'weapon', bonuses: { attack: 10, strength: 11, defence: 0 }, requires: { attack: 20 }, shape: 'axe', palette: ['#7d9adf', '#43598f'] },
+  { id: 'mithril_helm', name: 'Mithril helm', examine: 'You forget you are wearing it.', value: 560, slot: 'head', bonuses: { attack: 0, strength: 0, defence: 18 }, requires: { defence: 20 }, shape: 'helm', palette: ['#7d9adf', '#43598f'] },
+  { id: 'mithril_shield', name: 'Mithril shield', examine: 'Wide, and hardly any weight.', value: 820, slot: 'shield', bonuses: { attack: 0, strength: 0, defence: 24 }, requires: { defence: 20 }, shape: 'shield', palette: ['#7d9adf', '#43598f'] },
+  { id: 'mithril_platelegs', name: 'Mithril platelegs', examine: 'You could run in these.', value: 980, slot: 'legs', bonuses: { attack: 0, strength: 0, defence: 28 }, requires: { defence: 20 }, shape: 'legs', palette: ['#7d9adf', '#43598f'] },
+  { id: 'mithril_platebody', name: 'Mithril platebody', examine: 'Proper armour that does not weigh you down.', value: 1500, slot: 'body', bonuses: { attack: 0, strength: 0, defence: 38 }, requires: { defence: 20 }, shape: 'body', palette: ['#7d9adf', '#43598f'] },
+  { id: 'adamant_helm', name: 'Adamant helm', examine: 'Dark green, and utterly solid.', value: 1400, slot: 'head', bonuses: { attack: 0, strength: 0, defence: 26 }, requires: { defence: 30 }, shape: 'helm', palette: ['#4f9166', '#2c5a3d'] },
+  { id: 'adamant_shield', name: 'Adamant shield', examine: 'Nothing in the mine dents it.', value: 2000, slot: 'shield', bonuses: { attack: 0, strength: 0, defence: 34 }, requires: { defence: 30 }, shape: 'shield', palette: ['#4f9166', '#2c5a3d'] },
+  { id: 'adamant_platelegs', name: 'Adamant platelegs', examine: 'Heavy, but you stop noticing.', value: 2400, slot: 'legs', bonuses: { attack: 0, strength: 0, defence: 38 }, requires: { defence: 30 }, shape: 'legs', palette: ['#4f9166', '#2c5a3d'] },
+  { id: 'adamant_platebody', name: 'Adamant platebody', examine: 'The best armour a village smith can make.', value: 3600, slot: 'body', bonuses: { attack: 0, strength: 0, defence: 52 }, requires: { defence: 30 }, shape: 'body', palette: ['#4f9166', '#2c5a3d'] },
+  { id: 'ember_heart', name: 'Ember heart', examine: 'Warm against your collarbone.', value: 4200, slot: 'amulet', bonuses: { attack: 10, strength: 8, defence: 6 }, requires: { attack: 35 }, shape: 'amulet', palette: ['#ff8a3d', '#ffd166'] },
+  { id: 'cinder_cape', name: 'Cinder cape', examine: 'Woven from something that used to burn.', value: 3000, slot: 'cape', bonuses: { attack: 0, strength: 4, defence: 12 }, requires: { defence: 30 }, shape: 'cape', palette: ['#c0562a', '#5f2410'] },
+  { id: 'miners_boots', name: 'Miner\'s boots', examine: 'Steel toes. Mira swears by them.', value: 420, slot: 'boots', bonuses: { attack: 0, strength: 1, defence: 9 }, requires: { defence: 15 }, shape: 'boots', palette: ['#6b5a48', '#3c3226'] },
 
   // -------------------------------------------------------------- quest items
   { id: 'ancient_coin', name: 'Ancient coin', examine: 'Older than the village itself.', value: 0, questItem: true, shape: 'coin', palette: ['#cfd8dc', '#8a9298'] },

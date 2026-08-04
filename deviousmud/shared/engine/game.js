@@ -29,7 +29,7 @@ import {
 import { ITEMS, getItem, itemName, shopBuyPrice, shopSellPrice, bestTool } from '../items.js';
 import { SHOPS, shopDef, shopAccepts } from '../shops.js';
 import { COOKING, SMELTING, SMITHING, burnChance, smeltingRecipe, smithingRecipe } from '../crafting.js';
-import { NPC_SPAWNS, npcDef } from '../npcs.js';
+import { NPC_SPAWNS, creatureName, npcDef } from '../npcs.js';
 import { QUESTS, QUEST_IDS, questDef } from '../quests.js';
 import { OBJECT_TYPES, buildWorld, isWalkable, objectAt, planeAt, regionAt, tileAt } from '../world.js';
 import { createSkillSet, combatLevel, levelForXp, totalLevel } from '../skills.js';
@@ -176,6 +176,8 @@ export class Game {
         nextAttack: 0,
         path: [],
         anim: null,
+        phasesDone: 0,
+        enraged: false,
         wanderCooldown: Math.floor(this.rng() * 10)
       });
     }
@@ -1060,13 +1062,16 @@ export class Game {
     if (!target || target.dead || target.plane !== npc.plane) {
       // Climbing a ladder ends a fight: nothing follows you between levels.
       npc.targetId = null;
+      if (npc.def.boss) this.resetBoss(npc);
       return;
     }
-    if (chebyshev(npc.x, npc.y, npc.spawnX, npc.spawnY) > 12) {
+    if (chebyshev(npc.x, npc.y, npc.spawnX, npc.spawnY) > (npc.def.leash ?? 12)) {
       npc.targetId = null;
+      if (npc.def.boss) this.resetBoss(npc);
       npc.path = findPath(this.world, npc.x, npc.y, npc.spawnX, npc.spawnY, { plane: npc.plane });
       return;
     }
+    if (npc.def.boss) this.tickBossPhases(npc);
     if (!isAdjacent(npc.x, npc.y, target.x, target.y)) {
       if (npc.path.length === 0) npc.path = findPath(this.world, npc.x, npc.y, target.x, target.y, { range: 1, plane: npc.plane });
       return;
@@ -1078,6 +1083,10 @@ export class Game {
     npc.anim = { kind: 'attack', until: this.tickCount + 2 };
 
     const attacker = npcCombatStats(npc.def);
+    if (npc.enraged) {
+      attacker.attackBonus = Math.round(attacker.attackBonus * 1.2);
+      attacker.strengthBonus = Math.round(attacker.strengthBonus * 1.35);
+    }
     const defender = playerCombatStats(target);
     const result = resolveAttack(attacker, defender, this.rng);
     const damage = Math.min(result.damage, target.hp);
@@ -1086,6 +1095,78 @@ export class Game {
     this.pushSplat(target, damage, result.hit ? 'hit' : 'miss');
     if (damage > 0) this.awardXp(target, 'hitpoints', damage * 0.4);
     if (target.hp <= 0) this.knockOut(target);
+  }
+
+  /**
+   * A boss wakes up in stages. Each phase fires once, when its share of health
+   * is first crossed, and never again until the fight resets - so a long fight
+   * escalates rather than looping.
+   */
+  tickBossPhases(npc) {
+    const phases = npc.def.boss.phases || [];
+    const fraction = npc.hp / npc.maxHp;
+    while (npc.phasesDone < phases.length && fraction <= phases[npc.phasesDone].at) {
+      const phase = phases[npc.phasesDone];
+      npc.phasesDone += 1;
+      if (phase.enrage) npc.enraged = true;
+      for (let i = 0; i < (phase.summon || 0); i += 1) {
+        this.summonNpc(npc.def.boss.summon, npc);
+      }
+      if (phase.say) {
+        this.broadcastNear(npc.x, npc.y, npc.plane, 'msg', { text: phase.say, channel: 'system' });
+      }
+    }
+  }
+
+  /**
+   * Adds a creature that belongs to a fight rather than to the world: it never
+   * respawns, and it leaves when the fight it was called into ends.
+   */
+  summonNpc(type, source) {
+    const def = npcDef(type);
+    if (!def) return null;
+    const spot = this.findFreeTileNear(source.x, source.y, 4, source.plane);
+    if (!spot) return null;
+    const id = this.uid('n');
+    const npc = {
+      id,
+      kind: 'npc',
+      type,
+      def,
+      name: def.name,
+      x: spot.x,
+      y: spot.y,
+      plane: source.plane,
+      spawnX: source.spawnX,
+      spawnY: source.spawnY,
+      area: source.area,
+      dir: 'south',
+      hp: def.hp || 1,
+      maxHp: def.hp || 1,
+      dead: false,
+      respawnAt: 0,
+      targetId: source.targetId,
+      nextAttack: this.tickCount + 2,
+      path: [],
+      anim: null,
+      phasesDone: 0,
+      enraged: false,
+      summonedBy: source.id,
+      temporary: true,
+      wanderCooldown: 0
+    };
+    this.npcs.set(id, npc);
+    return npc;
+  }
+
+  /** Puts a boss back the way it was found, and dismisses anything it called. */
+  resetBoss(npc) {
+    npc.hp = npc.maxHp;
+    npc.phasesDone = 0;
+    npc.enraged = false;
+    for (const other of [...this.npcs.values()]) {
+      if (other.summonedBy === npc.id) this.npcs.delete(other.id);
+    }
   }
 
   pushSplat(entity, damage, kind) {
@@ -1103,7 +1184,21 @@ export class Game {
     npc.path = [];
     npc.respawnAt = this.tickCount + (npc.def.respawn || 30);
     player.combat.targetId = null;
-    this.message(player.id, `The ${npc.def.name.toLowerCase()} scampers away, defeated.`);
+
+    if (npc.def.boss) {
+      npc.phasesDone = 0;
+      npc.enraged = false;
+      for (const other of [...this.npcs.values()]) {
+        if (other.summonedBy === npc.id) this.npcs.delete(other.id);
+      }
+      this.broadcastNear(
+        npc.x, npc.y, npc.plane, 'msg',
+        { text: `${npc.def.name} yawns, banks its fire, and settles back down to sleep.`, channel: 'system' }
+      );
+      this.broadcastAll('msg', { text: `${player.name} has calmed ${npc.def.name}!`, channel: 'system' });
+    } else {
+      this.message(player.id, `${capitalise(creatureName(npc.def))} scampers away, defeated.`);
+    }
 
     for (const drop of npc.def.drops || []) {
       if (this.rng() > (drop.chance ?? 1)) continue;
@@ -1709,12 +1804,19 @@ export class Game {
 
   tickNpc(npc) {
     if (npc.dead) {
+      // Anything called into a fight leaves for good once it is over.
+      if (npc.temporary) {
+        this.npcs.delete(npc.id);
+        return;
+      }
       if (this.tickCount >= npc.respawnAt) {
         npc.dead = false;
         npc.hp = npc.maxHp;
         npc.x = npc.spawnX;
         npc.y = npc.spawnY;
         npc.anim = null;
+        npc.phasesDone = 0;
+        npc.enraged = false;
       }
       return;
     }
@@ -1728,7 +1830,7 @@ export class Game {
         if (combatLevel(player.skills) * 3 < (npc.def.level || 1)) continue;
         if (chebyshev(npc.x, npc.y, player.x, player.y) <= 3) {
           npc.targetId = player.id;
-          this.message(player.id, `The ${npc.def.name.toLowerCase()} takes an interest in you.`);
+          this.message(player.id, `${capitalise(creatureName(npc.def))} takes an interest in you.`);
           break;
         }
       }
@@ -1879,6 +1981,9 @@ export class Game {
         level: npc.def.level || 0,
         friendly: Boolean(npc.def.friendly),
         art: npc.def.art,
+        // How large to draw it. A boss drawn the same size as a rat reads as a
+        // rat with a lot of hitpoints.
+        size: npc.def.size || 1,
         anim: npc.anim ? npc.anim.kind : null
       });
     }
@@ -1928,6 +2033,10 @@ export class Game {
 }
 
 // ---------------------------------------------------------------- utilities
+
+function capitalise(text) {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
 
 /** Keeps a loaded save on a plane that actually exists. */
 function clampPlane(value) {

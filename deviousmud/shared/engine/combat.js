@@ -93,14 +93,30 @@ export function playerCombatStats(player) {
   };
 }
 
+/**
+ * The strength bonus an NPC needs in order to hit exactly as hard as its
+ * definition says.
+ *
+ * `maxHit` in an NPC definition is meant to be read literally - "this creature
+ * can take four hitpoints off you" - but max hit is a function of both strength
+ * level and strength bonus, and an NPC's strength level rises with its attack.
+ * Multiplying `maxHit` by a constant only lines up while the two happen to be
+ * similar; by the time a creature attacks at 70 it hits for twice what its
+ * definition claims. So invert `maxHit` instead and solve for the bonus.
+ */
+export function strengthBonusForMaxHit(strengthLevel, wanted) {
+  return Math.max(0, Math.round((640 * wanted) / (strengthLevel + 8) - 64));
+}
+
 /** Builds the stat block for an NPC from its definition. */
 export function npcCombatStats(def) {
+  const level = def.attack ?? 1;
   return {
-    attackLevel: def.attack ?? 1,
-    strengthLevel: def.attack ?? 1,
+    attackLevel: level,
+    strengthLevel: level,
     defenceLevel: def.defence ?? 1,
-    attackBonus: Math.round((def.attack ?? 1) * 1.2),
-    strengthBonus: Math.round((def.maxHit ?? 1) * 12),
+    attackBonus: Math.round(level * 1.2),
+    strengthBonus: strengthBonusForMaxHit(level, def.maxHit ?? 1),
     defenceBonus: Math.round((def.defence ?? 1) * 1.4),
     style: 'accurate'
   };

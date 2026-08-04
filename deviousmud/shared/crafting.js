@@ -6,7 +6,9 @@
 export const SMELTING = Object.freeze([
   { id: 'bronze_bar', name: 'Bronze bar', level: 1, xp: 7, inputs: [{ id: 'copper_ore', count: 1 }, { id: 'tin_ore', count: 1 }] },
   { id: 'iron_bar', name: 'Iron bar', level: 15, xp: 13, inputs: [{ id: 'iron_ore', count: 1 }], failChance: 0.45, failMessage: 'The ore is too impure and crumbles away.' },
-  { id: 'steel_bar', name: 'Steel bar', level: 30, xp: 18, inputs: [{ id: 'iron_ore', count: 1 }, { id: 'coal', count: 2 }] }
+  { id: 'steel_bar', name: 'Steel bar', level: 30, xp: 18, inputs: [{ id: 'iron_ore', count: 1 }, { id: 'coal', count: 2 }] },
+  { id: 'mithril_bar', name: 'Mithril bar', level: 35, xp: 30, inputs: [{ id: 'mithril_ore', count: 1 }, { id: 'coal', count: 3 }] },
+  { id: 'adamant_bar', name: 'Adamant bar', level: 50, xp: 45, inputs: [{ id: 'adamant_ore', count: 1 }, { id: 'coal', count: 5 }] }
 ]);
 
 export const SMITHING = Object.freeze([
@@ -24,7 +26,18 @@ export const SMITHING = Object.freeze([
   { id: 'steel_sword', name: 'Steel sword', level: 34, xp: 100, bar: 'steel_bar', bars: 2 },
   { id: 'steel_helm', name: 'Steel helm', level: 37, xp: 100, bar: 'steel_bar', bars: 2 },
   { id: 'steel_shield', name: 'Steel shield', level: 42, xp: 150, bar: 'steel_bar', bars: 3 },
-  { id: 'steel_platebody', name: 'Steel platebody', level: 48, xp: 250, bar: 'steel_bar', bars: 5 }
+  { id: 'steel_platebody', name: 'Steel platebody', level: 48, xp: 250, bar: 'steel_bar', bars: 5 },
+  { id: 'mithril_pickaxe', name: 'Mithril pickaxe', level: 40, xp: 150, bar: 'mithril_bar', bars: 1 },
+  { id: 'mithril_axe', name: 'Mithril axe', level: 40, xp: 150, bar: 'mithril_bar', bars: 1 },
+  { id: 'mithril_sword', name: 'Mithril sword', level: 43, xp: 200, bar: 'mithril_bar', bars: 2 },
+  { id: 'mithril_helm', name: 'Mithril helm', level: 46, xp: 200, bar: 'mithril_bar', bars: 2 },
+  { id: 'mithril_shield', name: 'Mithril shield', level: 50, xp: 300, bar: 'mithril_bar', bars: 3 },
+  { id: 'mithril_platelegs', name: 'Mithril platelegs', level: 54, xp: 400, bar: 'mithril_bar', bars: 4 },
+  { id: 'mithril_platebody', name: 'Mithril platebody', level: 58, xp: 500, bar: 'mithril_bar', bars: 5 },
+  { id: 'adamant_helm', name: 'Adamant helm', level: 62, xp: 400, bar: 'adamant_bar', bars: 2 },
+  { id: 'adamant_shield', name: 'Adamant shield', level: 66, xp: 600, bar: 'adamant_bar', bars: 3 },
+  { id: 'adamant_platelegs', name: 'Adamant platelegs', level: 70, xp: 800, bar: 'adamant_bar', bars: 4 },
+  { id: 'adamant_platebody', name: 'Adamant platebody', level: 74, xp: 1000, bar: 'adamant_bar', bars: 5 }
 ]);
 
 export const COOKING = Object.freeze({

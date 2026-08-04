@@ -229,7 +229,10 @@ function startGame() {
 
   // Debug/automation hook. The server is authoritative, so nothing here can be
   // used to cheat - it only exposes what this tab already knows.
-  window.DEVIOUSMUD = { state, renderer, minimap, actions, world };
+  // `transport` is exposed so an automated playthrough can reach the solo
+  // simulation directly. In multiplayer it is a socket and holds no authority,
+  // so this hands out nothing the tab did not already have.
+  window.DEVIOUSMUD = { state, renderer, minimap, actions, world, transport };
 
   // A ladder is a teleport, not a walk: snap the camera instead of gliding it
   // across the map, and drop the interpolation state of everything that was on

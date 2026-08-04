@@ -658,6 +658,8 @@ const PROPS = {
   rock_tin: (ctx, w, h) => drawIsoRock(ctx, w, h, '#c9c9c9'),
   rock_iron: (ctx, w, h) => drawIsoRock(ctx, w, h, '#a2543f'),
   rock_coal: (ctx, w, h) => drawIsoRock(ctx, w, h, '#2f3336'),
+  rock_mithril: (ctx, w, h) => drawIsoRock(ctx, w, h, '#5c7cbf'),
+  rock_adamant: (ctx, w, h) => drawIsoRock(ctx, w, h, '#3f7a52'),
   rock_spent: (ctx, w, h) => drawIsoRock(ctx, w, h, null),
   fish_spot: (ctx, w, h) => {
     const baseY = h - ISO_TILE_H / 2;
@@ -816,6 +818,7 @@ const PROP_HEIGHTS = {
   ladder_down: 44, ladder_up: 76, mine_entrance: 72, mine_cart: 40, brazier: 64,
   tree: 110, oak: 116, willow: 104, stump: 34,
   rock_copper: 56, rock_tin: 56, rock_iron: 56, rock_coal: 56, rock_spent: 56,
+  rock_mithril: 58, rock_adamant: 60,
   fish_spot: 34, bank: 62, counter: 58, furnace: 96, anvil: 56, range: 66,
   fountain: 62, sign: 62, fire: 48
 };
@@ -1045,34 +1048,175 @@ const CREATURES = {
   rat: (ctx, w, h, frame) => drawIsoBeast(ctx, w, h, { body: '#8a7f72', shade: '#6b6157', scale: 0.75, tail: true, frame }),
   wolf: (ctx, w, h, frame) => drawIsoBeast(ctx, w, h, { body: '#8e99a4', shade: '#5f6a75', scale: 1.05, tail: true, frame }),
   boar: (ctx, w, h, frame) => drawIsoBeast(ctx, w, h, { body: '#7a5a44', shade: '#5b4230', scale: 1, tusks: true, frame }),
-  golem: (ctx, w, h) => {
-    const cx = w / 2;
-    const groundY = h - 6;
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.beginPath();
-    ctx.ellipse(cx, groundY, 18, 8, 0, 0, Math.PI * 2);
-    ctx.fill();
-    const stone = '#6d675e';
-    ctx.fillStyle = shade(stone, FACE.left);
-    ctx.fillRect(cx - 14, groundY - 34, 14, 34);
-    ctx.fillStyle = shade(stone, FACE.right);
-    ctx.fillRect(cx, groundY - 34, 14, 34);
-    ctx.fillStyle = shade(stone, FACE.top);
-    ctx.beginPath();
-    ctx.moveTo(cx, groundY - 40);
-    ctx.lineTo(cx + 14, groundY - 34);
-    ctx.lineTo(cx, groundY - 28);
-    ctx.lineTo(cx - 14, groundY - 34);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = shade(stone, 0.72);
-    ctx.fillRect(cx - 22, groundY - 30, 7, 20);
-    ctx.fillRect(cx + 15, groundY - 30, 7, 20);
-    ctx.fillStyle = '#b87333';
-    ctx.fillRect(cx - 7, groundY - 32, 4, 3);
-    ctx.fillRect(cx + 3, groundY - 32, 4, 3);
-  }
+  bat: (ctx, w, h, frame) => drawIsoBat(ctx, w, h, '#6b5a72', '#3d3242', frame),
+  crawler: (ctx, w, h, frame) => drawIsoBeast(ctx, w, h, { body: '#6f5a45', shade: '#4a3a2c', scale: 0.72, tail: true, frame }),
+  sprite: (ctx, w, h, frame) => drawIsoGlow(ctx, w, h, '#cbb9a0', '#8a7a63', frame),
+  lurker: (ctx, w, h, frame) => drawIsoBeast(ctx, w, h, { body: '#3c4043', shade: '#202124', scale: 0.92, tail: true, frame }),
+  hound: (ctx, w, h, frame) => drawIsoBeast(ctx, w, h, { body: '#7a8590', shade: '#4a5560', scale: 1.05, tail: true, frame }),
+  deep_golem: (ctx, w, h) => drawIsoStoneFigure(ctx, w, h, '#4a4f5c', '#7d9adf', 1.05),
+  beetle: (ctx, w, h, frame) => drawIsoBeetle(ctx, w, h, frame),
+  wisp: (ctx, w, h, frame) => drawIsoGlow(ctx, w, h, '#ff8a3d', '#c0562a', frame),
+  guardian_statue: (ctx, w, h) => drawIsoStoneFigure(ctx, w, h, '#6b5a4a', '#ff8a3d', 1.18),
+  cinderheart: (ctx, w, h, frame) => drawIsoCinderheart(ctx, w, h, frame),
+  golem: (ctx, w, h) => drawIsoStoneFigure(ctx, w, h, '#6d675e', '#b87333', 1)
 };
+
+/**
+ * A blocky figure standing on the tile: two shaded body halves, a lit cap and
+ * a pair of arms. Golems, deep golems and the chamber statues share it, which
+ * is what makes them read as a family.
+ */
+function drawIsoStoneFigure(ctx, w, h, stone, eye, scale = 1) {
+  const cx = w / 2;
+  const groundY = h - 6;
+  const body = Math.round(34 * scale);
+  const half = Math.round(14 * scale);
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath();
+  ctx.ellipse(cx, groundY, 18 * scale, 8 * scale, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = shade(stone, FACE.left);
+  ctx.fillRect(cx - half, groundY - body, half, body);
+  ctx.fillStyle = shade(stone, FACE.right);
+  ctx.fillRect(cx, groundY - body, half, body);
+  ctx.fillStyle = shade(stone, FACE.top);
+  ctx.beginPath();
+  ctx.moveTo(cx, groundY - body - 6);
+  ctx.lineTo(cx + half, groundY - body);
+  ctx.lineTo(cx, groundY - body + 6);
+  ctx.lineTo(cx - half, groundY - body);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = shade(stone, 0.72);
+  ctx.fillRect(cx - half - 8, groundY - body * 0.88, 7, body * 0.6);
+  ctx.fillRect(cx + half + 1, groundY - body * 0.88, 7, body * 0.6);
+  ctx.fillStyle = eye;
+  ctx.fillRect(cx - 7, groundY - body + 2, 4, 3);
+  ctx.fillRect(cx + 3, groundY - body + 2, 4, 3);
+}
+
+function drawIsoBat(ctx, w, h, body, dark, frame) {
+  const cx = w / 2;
+  const cy = h - 30 - (frame % 2) * 3;
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.beginPath();
+  ctx.ellipse(cx, h - 6, 10, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  const spread = frame % 2 ? 20 : 15;
+  ctx.fillStyle = dark;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.quadraticCurveTo(cx - spread, cy - 9, cx - spread - 4, cy + 5);
+  ctx.quadraticCurveTo(cx - spread * 0.5, cy + 3, cx, cy + 5);
+  ctx.moveTo(cx, cy);
+  ctx.quadraticCurveTo(cx + spread, cy - 9, cx + spread + 4, cy + 5);
+  ctx.quadraticCurveTo(cx + spread * 0.5, cy + 3, cx, cy + 5);
+  ctx.fill();
+  ctx.fillStyle = body;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + 1, 6, 7, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#ffd166';
+  ctx.fillRect(cx - 3, cy - 2, 2, 2);
+  ctx.fillRect(cx + 1, cy - 2, 2, 2);
+}
+
+function drawIsoGlow(ctx, w, h, core, halo, frame) {
+  const cx = w / 2;
+  const cy = h - 26 - (frame % 2) * 2;
+  const r = 17 + (frame % 2);
+  const grad = ctx.createRadialGradient(cx, cy, 1, cx, cy, r);
+  grad.addColorStop(0, core);
+  grad.addColorStop(0.45, halo);
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#fff6dc';
+  ctx.beginPath();
+  ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawIsoBeetle(ctx, w, h, frame) {
+  const cx = w / 2;
+  const groundY = h - 8;
+  ctx.fillStyle = 'rgba(0,0,0,0.28)';
+  ctx.beginPath();
+  ctx.ellipse(cx, groundY + 2, 15, 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#3a2c44';
+  ctx.lineWidth = 2;
+  for (let i = -1; i <= 1; i += 1) {
+    const lift = (frame % 2 ? i : -i) * 2;
+    ctx.beginPath();
+    ctx.moveTo(cx - 9, groundY - 8 + i * 3);
+    ctx.lineTo(cx - 18, groundY - 1 + i * 2 + lift);
+    ctx.moveTo(cx + 9, groundY - 8 + i * 3);
+    ctx.lineTo(cx + 18, groundY - 1 + i * 2 - lift);
+    ctx.stroke();
+  }
+  ctx.fillStyle = shade('#5b4470', FACE.left);
+  ctx.beginPath();
+  ctx.ellipse(cx, groundY - 9, 13, 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(201,160,255,0.8)';
+  ctx.beginPath();
+  ctx.moveTo(cx, groundY - 19);
+  ctx.lineTo(cx + 7, groundY - 10);
+  ctx.lineTo(cx, groundY - 3);
+  ctx.lineTo(cx - 7, groundY - 10);
+  ctx.closePath();
+  ctx.fill();
+}
+
+/**
+ * Cinderheart. Bigger than anything else in the world, and drawn to look warm
+ * rather than dangerous: it is a creature having a bad dream, not a demon.
+ */
+function drawIsoCinderheart(ctx, w, h, frame) {
+  const cx = w / 2;
+  const groundY = h - 4;
+  const breathe = (frame % 2) * 2;
+
+  ctx.fillStyle = 'rgba(255,140,60,0.18)';
+  ctx.beginPath();
+  ctx.ellipse(cx, groundY - 4, 26, 11, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = shade('#4a2a22', FACE.left);
+  ctx.beginPath();
+  ctx.ellipse(cx, groundY - 20 - breathe, 22, 17, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = shade('#5c3428', FACE.top);
+  ctx.beginPath();
+  ctx.ellipse(cx, groundY - 26 - breathe, 18, 11, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Coals showing through the cracks in its back.
+  ctx.fillStyle = '#e2703a';
+  for (let i = 0; i < 6; i += 1) {
+    const a = (i / 6) * Math.PI * 2;
+    ctx.fillRect(cx + Math.cos(a) * 13 - 2, groundY - 26 - breathe + Math.sin(a) * 7 - 1, 4, 3);
+  }
+  ctx.fillStyle = '#ffd166';
+  ctx.beginPath();
+  ctx.ellipse(cx, groundY - 24 - breathe, 7, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Head, and two sleepy eyes.
+  ctx.fillStyle = shade('#4a2a22', FACE.right);
+  ctx.beginPath();
+  ctx.ellipse(cx + 12, groundY - 34 - breathe, 11, 9, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#ffd166';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(cx + 9, groundY - 36 - breathe, 3, 0.25, Math.PI - 0.25);
+  ctx.arc(cx + 16, groundY - 36 - breathe, 3, 0.25, Math.PI - 0.25);
+  ctx.stroke();
+}
 
 export function isoNpcSprite(art, frame, facing) {
   const key = `npc:${art}:${frame}:${facing}`;

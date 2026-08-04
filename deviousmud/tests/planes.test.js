@@ -12,8 +12,12 @@ import assert from 'node:assert/strict';
 
 import { Game } from '../shared/engine/game.js';
 import { findPath } from '../shared/engine/pathfinding.js';
-import { buildWorld, checksumWorld, isWalkable, makeRng, planeAt, planeDarkness, planeLights, objectAt, regionAt } from '../shared/world.js';
+import { OBJECT_TYPES, buildWorld, checksumWorld, isWalkable, makeRng, planeAt, planeDarkness, planeLights, objectAt, regionAt } from '../shared/world.js';
 import { PLANE_COUNT, SPAWN_POINT, SURFACE, TILE, VIEW_RADIUS } from '../shared/constants.js';
+import { NPC_TYPES } from '../shared/npcs.js';
+import { getItem } from '../shared/items.js';
+import { SMELTING, SMITHING } from '../shared/crafting.js';
+import { maxHit, npcCombatStats } from '../shared/engine/combat.js';
 
 function newGame() {
   return new Game({ world: buildWorld(), rng: makeRng(4242) });
@@ -177,9 +181,11 @@ test('the state stream stops at the edge of your own level', () => {
   assert.deepEqual(forAbove.players.map((p) => p.id), ['a'], 'the player underground is not visible');
   assert.deepEqual(forBelow.players.map((p) => p.id), ['b']);
   assert.equal(forBelow.self.plane, 1);
-  assert.ok(forAbove.npcs.every((npc) => npc.id !== undefined));
-  // Villagers stand on the surface, so nobody underground should see one.
-  assert.equal(forBelow.npcs.length, 0);
+  // Villagers stand on the surface, so nobody underground should see one - but
+  // the mine has creatures of its own, and those are exactly what you should see.
+  const surfaceOnly = new Set([...game.npcs.values()].filter((npc) => npc.plane === SURFACE).map((npc) => npc.id));
+  assert.equal(forBelow.npcs.some((npc) => surfaceOnly.has(npc.id)), false);
+  assert.equal(forAbove.npcs.every((npc) => surfaceOnly.has(npc.id)), true);
 });
 
 test('a click cannot reach through the floor', () => {
@@ -413,6 +419,167 @@ test('the state message tells the client how far everyone can see', () => {
   assert.equal(view.self.light, 0);
   const other = view.players.find((entry) => entry.id === 'p2');
   assert.ok(other.light > 0, 'a friend carrying a torch lights the way for you too');
+});
+
+// ----------------------------------------------------------------- content
+
+test('every creature spawns somewhere it can actually stand', () => {
+  const game = newGame();
+  for (const npc of game.npcs.values()) {
+    assert.ok(
+      isWalkable(game.world, npc.x, npc.y, npc.plane),
+      `${npc.type} spawned inside a wall at ${npc.x},${npc.y} on plane ${npc.plane}`
+    );
+  }
+});
+
+test('the mine is populated from top to bottom, getting harder as it goes', () => {
+  const game = newGame();
+  const levels = [1, 2, 3].map((plane) => {
+    const here = [...game.npcs.values()].filter((npc) => npc.plane === plane && !npc.def.friendly);
+    return { plane, count: here.length, top: Math.max(...here.map((npc) => npc.def.level || 0)) };
+  });
+  for (const level of levels) assert.ok(level.count >= 5, `plane ${level.plane} is empty`);
+  assert.ok(levels[1].top > levels[0].top, 'the second level is harder than the first');
+  assert.ok(levels[2].top > levels[1].top, 'the third is harder than the second');
+});
+
+test('every drop a creature can leave is a real item', () => {
+  for (const [type, def] of Object.entries(NPC_TYPES)) {
+    for (const drop of def.drops || []) {
+      assert.ok(getItem(drop.id), `${type} drops an unknown item: ${drop.id}`);
+    }
+  }
+});
+
+test('a creature hits exactly as hard as its definition says', () => {
+  for (const [type, def] of Object.entries(NPC_TYPES)) {
+    if (!def.maxHit) continue;
+    const stats = npcCombatStats(def);
+    assert.equal(
+      maxHit(stats.strengthLevel, stats.strengthBonus),
+      def.maxHit,
+      `${type} says it hits for ${def.maxHit}`
+    );
+  }
+});
+
+test('the new ore tiers run all the way from rock to armour', () => {
+  const world = buildWorld();
+  for (const [rock, ore, bar, gear] of [
+    ['mithril_rock', 'mithril_ore', 'mithril_bar', 'mithril_platebody'],
+    ['adamant_rock', 'adamant_ore', 'adamant_bar', 'adamant_platebody']
+  ]) {
+    const found = world.allObjects.filter((obj) => obj.type === rock);
+    assert.ok(found.length > 0, `${rock} should exist somewhere`);
+    assert.ok(found.every((obj) => obj.plane > 0), `${rock} belongs underground`);
+    assert.equal(OBJECT_TYPES[rock].action.yields, ore);
+
+    const smelt = SMELTING.find((recipe) => recipe.id === bar);
+    assert.ok(smelt, `${bar} should be smeltable`);
+    assert.ok(smelt.inputs.some((input) => input.id === ore));
+
+    const smith = SMITHING.find((recipe) => recipe.id === gear);
+    assert.ok(smith, `${gear} should be smithable`);
+    assert.equal(smith.bar, bar);
+    assert.ok(getItem(gear).bonuses.defence > getItem('steel_platebody').bonuses.defence);
+  }
+});
+
+// ------------------------------------------------------------------- boss
+
+function bossFight(game) {
+  const boss = [...game.npcs.values()].find((npc) => npc.type === 'cinderheart');
+  const player = game.addPlayer('hero', { name: 'Hero' });
+  player.plane = boss.plane;
+  player.x = boss.x + 1;
+  player.y = boss.y;
+  for (const skill of ['attack', 'strength', 'defence', 'hitpoints']) {
+    player.skills[skill].level = 70;
+    player.skills[skill].xp = 999999;
+  }
+  player.hp = 70;
+  return { boss, player };
+}
+
+test('there is exactly one boss, and it waits in its own chamber', () => {
+  const game = newGame();
+  const bosses = [...game.npcs.values()].filter((npc) => npc.def.boss);
+  assert.equal(bosses.length, 1);
+  assert.equal(bosses[0].plane, PLANE_COUNT - 1);
+  assert.equal(bosses[0].def.wander, 0, 'it does not go wandering');
+});
+
+test('the boss wakes up in stages, and each stage fires once', () => {
+  const game = newGame();
+  const { boss, player } = bossFight(game);
+  game.startCombat(player, boss);
+  game.drain();
+
+  boss.hp = Math.floor(boss.maxHp * 0.6);
+  game.tickBossPhases(boss);
+  assert.equal(boss.phasesDone, 1, 'the first stage has fired');
+  const summoned = [...game.npcs.values()].filter((npc) => npc.summonedBy === boss.id);
+  assert.ok(summoned.length > 0, 'it calls something to it');
+  assert.ok(summoned.every((npc) => npc.plane === boss.plane));
+
+  // Ticking again at the same health must not fire it a second time.
+  game.tickBossPhases(boss);
+  assert.equal(boss.phasesDone, 1);
+  assert.equal([...game.npcs.values()].filter((npc) => npc.summonedBy === boss.id).length, summoned.length);
+
+  boss.hp = Math.floor(boss.maxHp * 0.3);
+  game.tickBossPhases(boss);
+  assert.equal(boss.phasesDone, 2);
+  assert.equal(boss.enraged, true, 'the last stage stokes it');
+
+  const said = game.drain().filter((entry) => entry.msg.t === 'msg').map((entry) => entry.msg.text);
+  assert.ok(said.some((text) => /Cinderheart stirs/.test(text)));
+});
+
+test('walking away from the boss puts everything back as it was', () => {
+  const game = newGame();
+  const { boss, player } = bossFight(game);
+  game.startCombat(player, boss);
+  boss.hp = 40;
+  game.tickBossPhases(boss);
+  assert.ok([...game.npcs.values()].some((npc) => npc.summonedBy === boss.id));
+
+  // Climbing out ends the fight.
+  player.plane = SURFACE;
+  game.tickNpcCombat(boss);
+  assert.equal(boss.hp, boss.maxHp, 'the boss heals back up');
+  assert.equal(boss.phasesDone, 0);
+  assert.equal(boss.enraged, false);
+  assert.equal([...game.npcs.values()].some((npc) => npc.summonedBy === boss.id), false, 'and dismisses its wisps');
+});
+
+test('defeating the boss dismisses its wisps and tells the world', () => {
+  const game = newGame();
+  const { boss, player } = bossFight(game);
+  game.startCombat(player, boss);
+  boss.hp = 40;
+  game.tickBossPhases(boss);
+  game.drain();
+
+  boss.hp = 0;
+  game.defeatNpc(player, boss);
+  assert.equal([...game.npcs.values()].some((npc) => npc.summonedBy === boss.id), false);
+  const said = game.drain().filter((entry) => entry.msg.t === 'msg').map((entry) => entry.msg.text);
+  assert.ok(said.some((text) => /settles back down to sleep/.test(text)), 'it goes back to sleep, it is not killed');
+  assert.ok(said.some((text) => /has calmed Cinderheart/.test(text)), 'and the whole world hears about it');
+});
+
+test('a summoned wisp never respawns', () => {
+  const game = newGame();
+  const { boss, player } = bossFight(game);
+  const wisp = game.summonNpc('ember_wisp', boss);
+  assert.ok(wisp.temporary);
+
+  wisp.hp = 0;
+  game.defeatNpc(player, wisp);
+  game.tickNpc(wisp);
+  assert.equal(game.npcs.has(wisp.id), false, 'it is gone for good');
 });
 
 test('view radius still bounds what you receive on a mine level', () => {

@@ -58,6 +58,14 @@ export const OBJECT_TYPES = Object.freeze({
     name: 'Coal rock', blocked: true, art: 'rock_coal',
     action: { id: 'mine', label: 'Mine', skill: 'mining', level: 30, xp: 50, tool: 'pickaxe', yields: 'coal', respawn: 26, verb: 'swing your pickaxe at' }
   },
+  mithril_rock: {
+    name: 'Mithril rock', blocked: true, art: 'rock_mithril',
+    action: { id: 'mine', label: 'Mine', skill: 'mining', level: 40, xp: 80, tool: 'pickaxe', yields: 'mithril_ore', respawn: 40, verb: 'swing your pickaxe at' }
+  },
+  adamant_rock: {
+    name: 'Adamant rock', blocked: true, art: 'rock_adamant',
+    action: { id: 'mine', label: 'Mine', skill: 'mining', level: 55, xp: 130, tool: 'pickaxe', yields: 'adamant_ore', respawn: 70, verb: 'swing your pickaxe at' }
+  },
   shrimp_spot: {
     name: 'Fishing spot', blocked: false, water: true, art: 'fish_spot',
     action: { id: 'fish', label: 'Net', skill: 'fishing', level: 1, xp: 10, tool: 'net', yields: 'raw_shrimp', respawn: 0, verb: 'cast your net into' }
@@ -465,10 +473,11 @@ const MINE_LEVELS = [
       ['coalface', 'descent'], ['fungus', 'descent']
     ],
     ore: [
-      { room: 'seam', types: ['coal_rock', 'iron_rock'], count: 12 },
+      { room: 'seam', types: ['mithril_rock', 'coal_rock', 'iron_rock'], count: 12 },
       { room: 'coalface', types: ['coal_rock', 'coal_rock', 'iron_rock'], count: 13 },
       { room: 'hall', types: ['iron_rock', 'coal_rock'], count: 8 },
-      { room: 'vault', types: ['coal_rock'], count: 6 }
+      { room: 'vault', types: ['mithril_rock', 'mithril_rock', 'coal_rock'], count: 8 },
+      { room: 'fungus', types: ['coal_rock', 'mithril_rock'], count: 7 }
     ]
   },
   {
@@ -485,9 +494,29 @@ const MINE_LEVELS = [
       hall: { x: 26, y: 46, w: 26, h: 22 }
     },
     corridors: [['landing', 'approach'], ['approach', 'hall']],
-    ore: []
+    ore: [
+      { room: 'approach', types: ['adamant_rock', 'mithril_rock'], count: 5 },
+      { room: 'landing', types: ['mithril_rock'], count: 3 },
+      // Adamant in the boss's own hall: the richest rock in the world is also
+      // the one you have to earn the right to stand next to.
+      { room: 'hall', types: ['adamant_rock'], count: 7 }
+    ]
   }
 ];
+
+/**
+ * The mine's floor plan, published so that creature spawns and quest steps can
+ * say "the coal face on level two" instead of repeating a pair of numbers that
+ * would then have to be kept in step by hand.
+ */
+export const MINE_ROOMS = Object.freeze(
+  Object.fromEntries(MINE_LEVELS.map((spec) => [spec.plane, spec.rooms]))
+);
+
+export function mineRoom(plane, id) {
+  const rooms = MINE_ROOMS[plane];
+  return (rooms && rooms[id]) || null;
+}
 
 function roomCentre(room) {
   return { x: room.x + Math.floor(room.w / 2), y: room.y + Math.floor(room.h / 2) };

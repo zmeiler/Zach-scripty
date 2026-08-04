@@ -268,6 +268,8 @@ const OBJECT_PAINTERS = {
   rock_tin: (ctx, w, h) => drawRock(ctx, w, h, '#c9c9c9'),
   rock_iron: (ctx, w, h) => drawRock(ctx, w, h, '#a2543f'),
   rock_coal: (ctx, w, h) => drawRock(ctx, w, h, '#2f3336'),
+  rock_mithril: (ctx, w, h) => drawRock(ctx, w, h, '#5c7cbf'),
+  rock_adamant: (ctx, w, h) => drawRock(ctx, w, h, '#3f7a52'),
   rock_spent: (ctx, w, h) => drawRock(ctx, w, h, null),
   fish_spot: (ctx, w, h) => {
     ctx.strokeStyle = 'rgba(255,255,255,0.65)';
@@ -475,19 +477,126 @@ const CREATURE_PAINTERS = {
   boar: (ctx, w, h) => drawBeast(ctx, w, h, '#7a5a44', '#5b4230', 0.7),
   goblin: (ctx, w, h) => drawHumanoid(ctx, w, h, { shirt: '#6b8f3a', legs: '#4a5c2a', skin: '#7fa050', hair: '#3f5220' }, 0.82),
   imp: (ctx, w, h) => drawHumanoid(ctx, w, h, { shirt: '#8e44ad', legs: '#5b2c6f', skin: '#c0679a', hair: '#2b1030' }, 0.7),
-  golem: (ctx, w, h) => {
-    ctx.fillStyle = '#6d675e';
-    ctx.fillRect(w * 0.22, h * 0.3, w * 0.56, h * 0.55);
-    ctx.fillStyle = '#57514a';
-    ctx.fillRect(w * 0.3, h * 0.16, w * 0.4, h * 0.2);
-    ctx.fillStyle = '#b87333';
-    ctx.fillRect(w * 0.38, h * 0.22, w * 0.08, h * 0.06);
-    ctx.fillRect(w * 0.56, h * 0.22, w * 0.08, h * 0.06);
-    ctx.fillStyle = '#4b463f';
-    ctx.fillRect(w * 0.16, h * 0.38, w * 0.1, h * 0.34);
-    ctx.fillRect(w * 0.74, h * 0.38, w * 0.1, h * 0.34);
-  }
+  golem: (ctx, w, h) => drawStoneFigure(ctx, w, h, '#6d675e', '#57514a', '#4b463f', '#b87333'),
+
+  // ------------------------------------------------------- mine creatures
+  bat: (ctx, w, h) => drawBat(ctx, w, h, '#6b5a72', '#3d3242'),
+  crawler: (ctx, w, h) => drawBeast(ctx, w, h, '#6f5a45', '#4a3a2c', 0.5, true),
+  sprite: (ctx, w, h) => drawGlow(ctx, w, h, '#cbb9a0', '#8a7a63'),
+  lurker: (ctx, w, h) => drawBeast(ctx, w, h, '#3c4043', '#202124', 0.66, true),
+  hound: (ctx, w, h) => drawBeast(ctx, w, h, '#7a8590', '#4a5560', 0.78),
+  deep_golem: (ctx, w, h) => drawStoneFigure(ctx, w, h, '#4a4f5c', '#383d47', '#2f333c', '#7d9adf'),
+  beetle: (ctx, w, h) => drawBeetle(ctx, w, h),
+  wisp: (ctx, w, h) => drawGlow(ctx, w, h, '#ff8a3d', '#c0562a'),
+  guardian_statue: (ctx, w, h) => drawStoneFigure(ctx, w, h, '#6b5a4a', '#4f4237', '#3a3029', '#ff8a3d'),
+  cinderheart: (ctx, w, h) => drawCinderheart(ctx, w, h)
 };
+
+/** A blocky figure carved out of something. Golems and statues share it. */
+function drawStoneFigure(ctx, w, h, body, headColour, limb, eye) {
+  ctx.fillStyle = body;
+  ctx.fillRect(w * 0.22, h * 0.3, w * 0.56, h * 0.55);
+  ctx.fillStyle = headColour;
+  ctx.fillRect(w * 0.3, h * 0.16, w * 0.4, h * 0.2);
+  ctx.fillStyle = eye;
+  ctx.fillRect(w * 0.38, h * 0.22, w * 0.08, h * 0.06);
+  ctx.fillRect(w * 0.56, h * 0.22, w * 0.08, h * 0.06);
+  ctx.fillStyle = limb;
+  ctx.fillRect(w * 0.16, h * 0.38, w * 0.1, h * 0.34);
+  ctx.fillRect(w * 0.74, h * 0.38, w * 0.1, h * 0.34);
+}
+
+function drawBat(ctx, w, h, body, dark) {
+  const cy = h * 0.42;
+  ctx.fillStyle = dark;
+  ctx.beginPath();
+  ctx.moveTo(w * 0.5, cy);
+  ctx.quadraticCurveTo(w * 0.16, cy - h * 0.14, w * 0.04, cy + h * 0.06);
+  ctx.quadraticCurveTo(w * 0.24, cy + h * 0.04, w * 0.5, cy + h * 0.08);
+  ctx.moveTo(w * 0.5, cy);
+  ctx.quadraticCurveTo(w * 0.84, cy - h * 0.14, w * 0.96, cy + h * 0.06);
+  ctx.quadraticCurveTo(w * 0.76, cy + h * 0.04, w * 0.5, cy + h * 0.08);
+  ctx.fill();
+  ctx.fillStyle = body;
+  ctx.beginPath();
+  ctx.ellipse(w * 0.5, cy + h * 0.02, w * 0.12, h * 0.1, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#ffd166';
+  ctx.fillRect(w * 0.45, cy - h * 0.02, 2, 2);
+  ctx.fillRect(w * 0.53, cy - h * 0.02, 2, 2);
+}
+
+/** Wisps and sprites: a bright core inside a soft halo. */
+function drawGlow(ctx, w, h, core, halo) {
+  const cy = h * 0.46;
+  const grad = ctx.createRadialGradient(w * 0.5, cy, 1, w * 0.5, cy, w * 0.44);
+  grad.addColorStop(0, core);
+  grad.addColorStop(0.5, halo);
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(w * 0.5, cy, w * 0.44, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#fff6dc';
+  ctx.beginPath();
+  ctx.arc(w * 0.5, cy, w * 0.1, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawBeetle(ctx, w, h) {
+  const cy = h * 0.55;
+  ctx.strokeStyle = '#3a2c44';
+  ctx.lineWidth = 2;
+  for (let i = -1; i <= 1; i += 1) {
+    ctx.beginPath();
+    ctx.moveTo(w * 0.32, cy + i * h * 0.06);
+    ctx.lineTo(w * 0.16, cy + i * h * 0.1 + h * 0.06);
+    ctx.moveTo(w * 0.68, cy + i * h * 0.06);
+    ctx.lineTo(w * 0.84, cy + i * h * 0.1 + h * 0.06);
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#5b4470';
+  ctx.beginPath();
+  ctx.ellipse(w * 0.5, cy, w * 0.24, h * 0.16, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(201,160,255,0.75)';
+  ctx.beginPath();
+  ctx.moveTo(w * 0.5, cy - h * 0.16);
+  ctx.lineTo(w * 0.62, cy);
+  ctx.lineTo(w * 0.5, cy + h * 0.12);
+  ctx.lineTo(w * 0.38, cy);
+  ctx.closePath();
+  ctx.fill();
+}
+
+/** The boss: a big warm shape with coals showing through the cracks. */
+function drawCinderheart(ctx, w, h) {
+  const cy = h * 0.52;
+  ctx.fillStyle = 'rgba(255,140,60,0.2)';
+  ctx.beginPath();
+  ctx.ellipse(w * 0.5, cy, w * 0.5, h * 0.34, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#4a2a22';
+  ctx.beginPath();
+  ctx.ellipse(w * 0.5, cy, w * 0.4, h * 0.26, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#e2703a';
+  for (let i = 0; i < 5; i += 1) {
+    const a = (i / 5) * Math.PI * 2;
+    ctx.fillRect(w * 0.5 + Math.cos(a) * w * 0.2 - 2, cy + Math.sin(a) * h * 0.13 - 2, 5, 4);
+  }
+  ctx.fillStyle = '#ffd166';
+  ctx.beginPath();
+  ctx.ellipse(w * 0.5, cy - h * 0.02, w * 0.12, h * 0.07, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Two sleepy eyes.
+  ctx.strokeStyle = '#2b1a14';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(w * 0.4, cy - h * 0.12, 4, 0.2, Math.PI - 0.2);
+  ctx.arc(w * 0.6, cy - h * 0.12, 4, 0.2, Math.PI - 0.2);
+  ctx.stroke();
+}
 
 function drawBeast(ctx, w, h, body, shade, scale, tail = false) {
   const top = h * (1 - scale * 0.55);

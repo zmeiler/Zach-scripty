@@ -992,7 +992,10 @@ function startGame() {
 
   // Debug/automation hook. The server is authoritative, so nothing here can be
   // used to cheat - it only exposes what this tab already knows.
-  window.DEVIOUSMUD = { state, renderer, minimap, actions, world };
+  // `transport` is exposed so an automated playthrough can reach the solo
+  // simulation directly. In multiplayer it is a socket and holds no authority,
+  // so this hands out nothing the tab did not already have.
+  window.DEVIOUSMUD = { state, renderer, minimap, actions, world, transport };
 
   // A ladder is a teleport, not a walk: snap the camera instead of gliding it
   // across the map, and drop the interpolation state of everything that was on
@@ -1095,6 +1098,14 @@ const OBJECT_TYPES = Object.freeze({
   coal_rock: {
     name: 'Coal rock', blocked: true, art: 'rock_coal',
     action: { id: 'mine', label: 'Mine', skill: 'mining', level: 30, xp: 50, tool: 'pickaxe', yields: 'coal', respawn: 26, verb: 'swing your pickaxe at' }
+  },
+  mithril_rock: {
+    name: 'Mithril rock', blocked: true, art: 'rock_mithril',
+    action: { id: 'mine', label: 'Mine', skill: 'mining', level: 40, xp: 80, tool: 'pickaxe', yields: 'mithril_ore', respawn: 40, verb: 'swing your pickaxe at' }
+  },
+  adamant_rock: {
+    name: 'Adamant rock', blocked: true, art: 'rock_adamant',
+    action: { id: 'mine', label: 'Mine', skill: 'mining', level: 55, xp: 130, tool: 'pickaxe', yields: 'adamant_ore', respawn: 70, verb: 'swing your pickaxe at' }
   },
   shrimp_spot: {
     name: 'Fishing spot', blocked: false, water: true, art: 'fish_spot',
@@ -1502,10 +1513,11 @@ const MINE_LEVELS = [
       ['coalface', 'descent'], ['fungus', 'descent']
     ],
     ore: [
-      { room: 'seam', types: ['coal_rock', 'iron_rock'], count: 12 },
+      { room: 'seam', types: ['mithril_rock', 'coal_rock', 'iron_rock'], count: 12 },
       { room: 'coalface', types: ['coal_rock', 'coal_rock', 'iron_rock'], count: 13 },
       { room: 'hall', types: ['iron_rock', 'coal_rock'], count: 8 },
-      { room: 'vault', types: ['coal_rock'], count: 6 }
+      { room: 'vault', types: ['mithril_rock', 'mithril_rock', 'coal_rock'], count: 8 },
+      { room: 'fungus', types: ['coal_rock', 'mithril_rock'], count: 7 }
     ]
   },
   {
@@ -1522,9 +1534,28 @@ const MINE_LEVELS = [
       hall: { x: 26, y: 46, w: 26, h: 22 }
     },
     corridors: [['landing', 'approach'], ['approach', 'hall']],
-    ore: []
+    ore: [
+      { room: 'approach', types: ['adamant_rock', 'mithril_rock'], count: 5 },
+      { room: 'landing', types: ['mithril_rock'], count: 3 },
+      // Adamant in the boss's own hall: the richest rock in the world is also
+      // the one you have to earn the right to stand next to.
+      { room: 'hall', types: ['adamant_rock'], count: 7 }
+    ]
   }
 ];
+
+/**
+ * The mine's floor plan, published so that creature spawns and quest steps can
+ * say "the coal face on level two" instead of repeating a pair of numbers that
+ * would then have to be kept in step by hand.
+ */
+const MINE_ROOMS = Object.freeze(
+  Object.fromEntries(MINE_LEVELS.map((spec) => [spec.plane, spec.rooms]))
+);
+function mineRoom(plane, id) {
+  const rooms = MINE_ROOMS[plane];
+  return (rooms && rooms[id]) || null;
+}
 
 function roomCentre(room) {
   return { x: room.x + Math.floor(room.w / 2), y: room.y + Math.floor(room.h / 2) };
@@ -1741,6 +1772,8 @@ function planeDarkness(world, plane = SURFACE) {
   __exports.REGIONS = REGIONS;
   __exports.buildWorld = buildWorld;
   __exports.planeAt = planeAt;
+  __exports.MINE_ROOMS = MINE_ROOMS;
+  __exports.mineRoom = mineRoom;
   __exports.planeLights = planeLights;
   __exports.checksumWorld = checksumWorld;
   __exports.tileAt = tileAt;
@@ -2539,7 +2572,7 @@ const { BANK_SIZE,
 const { ITEMS, getItem, itemName, shopBuyPrice, shopSellPrice, bestTool } = __require("shared/items.js");
 const { SHOPS, shopDef, shopAccepts } = __require("shared/shops.js");
 const { COOKING, SMELTING, SMITHING, burnChance, smeltingRecipe, smithingRecipe } = __require("shared/crafting.js");
-const { NPC_SPAWNS, npcDef } = __require("shared/npcs.js");
+const { NPC_SPAWNS, creatureName, npcDef } = __require("shared/npcs.js");
 const { QUESTS, QUEST_IDS, questDef } = __require("shared/quests.js");
 const { OBJECT_TYPES, buildWorld, isWalkable, objectAt, planeAt, regionAt, tileAt } = __require("shared/world.js");
 const { createSkillSet, combatLevel, levelForXp, totalLevel } = __require("shared/skills.js");
@@ -2678,6 +2711,8 @@ class Game {
         nextAttack: 0,
         path: [],
         anim: null,
+        phasesDone: 0,
+        enraged: false,
         wanderCooldown: Math.floor(this.rng() * 10)
       });
     }
@@ -3562,13 +3597,16 @@ class Game {
     if (!target || target.dead || target.plane !== npc.plane) {
       // Climbing a ladder ends a fight: nothing follows you between levels.
       npc.targetId = null;
+      if (npc.def.boss) this.resetBoss(npc);
       return;
     }
-    if (chebyshev(npc.x, npc.y, npc.spawnX, npc.spawnY) > 12) {
+    if (chebyshev(npc.x, npc.y, npc.spawnX, npc.spawnY) > (npc.def.leash ?? 12)) {
       npc.targetId = null;
+      if (npc.def.boss) this.resetBoss(npc);
       npc.path = findPath(this.world, npc.x, npc.y, npc.spawnX, npc.spawnY, { plane: npc.plane });
       return;
     }
+    if (npc.def.boss) this.tickBossPhases(npc);
     if (!isAdjacent(npc.x, npc.y, target.x, target.y)) {
       if (npc.path.length === 0) npc.path = findPath(this.world, npc.x, npc.y, target.x, target.y, { range: 1, plane: npc.plane });
       return;
@@ -3580,6 +3618,10 @@ class Game {
     npc.anim = { kind: 'attack', until: this.tickCount + 2 };
 
     const attacker = npcCombatStats(npc.def);
+    if (npc.enraged) {
+      attacker.attackBonus = Math.round(attacker.attackBonus * 1.2);
+      attacker.strengthBonus = Math.round(attacker.strengthBonus * 1.35);
+    }
     const defender = playerCombatStats(target);
     const result = resolveAttack(attacker, defender, this.rng);
     const damage = Math.min(result.damage, target.hp);
@@ -3588,6 +3630,78 @@ class Game {
     this.pushSplat(target, damage, result.hit ? 'hit' : 'miss');
     if (damage > 0) this.awardXp(target, 'hitpoints', damage * 0.4);
     if (target.hp <= 0) this.knockOut(target);
+  }
+
+  /**
+   * A boss wakes up in stages. Each phase fires once, when its share of health
+   * is first crossed, and never again until the fight resets - so a long fight
+   * escalates rather than looping.
+   */
+  tickBossPhases(npc) {
+    const phases = npc.def.boss.phases || [];
+    const fraction = npc.hp / npc.maxHp;
+    while (npc.phasesDone < phases.length && fraction <= phases[npc.phasesDone].at) {
+      const phase = phases[npc.phasesDone];
+      npc.phasesDone += 1;
+      if (phase.enrage) npc.enraged = true;
+      for (let i = 0; i < (phase.summon || 0); i += 1) {
+        this.summonNpc(npc.def.boss.summon, npc);
+      }
+      if (phase.say) {
+        this.broadcastNear(npc.x, npc.y, npc.plane, 'msg', { text: phase.say, channel: 'system' });
+      }
+    }
+  }
+
+  /**
+   * Adds a creature that belongs to a fight rather than to the world: it never
+   * respawns, and it leaves when the fight it was called into ends.
+   */
+  summonNpc(type, source) {
+    const def = npcDef(type);
+    if (!def) return null;
+    const spot = this.findFreeTileNear(source.x, source.y, 4, source.plane);
+    if (!spot) return null;
+    const id = this.uid('n');
+    const npc = {
+      id,
+      kind: 'npc',
+      type,
+      def,
+      name: def.name,
+      x: spot.x,
+      y: spot.y,
+      plane: source.plane,
+      spawnX: source.spawnX,
+      spawnY: source.spawnY,
+      area: source.area,
+      dir: 'south',
+      hp: def.hp || 1,
+      maxHp: def.hp || 1,
+      dead: false,
+      respawnAt: 0,
+      targetId: source.targetId,
+      nextAttack: this.tickCount + 2,
+      path: [],
+      anim: null,
+      phasesDone: 0,
+      enraged: false,
+      summonedBy: source.id,
+      temporary: true,
+      wanderCooldown: 0
+    };
+    this.npcs.set(id, npc);
+    return npc;
+  }
+
+  /** Puts a boss back the way it was found, and dismisses anything it called. */
+  resetBoss(npc) {
+    npc.hp = npc.maxHp;
+    npc.phasesDone = 0;
+    npc.enraged = false;
+    for (const other of [...this.npcs.values()]) {
+      if (other.summonedBy === npc.id) this.npcs.delete(other.id);
+    }
   }
 
   pushSplat(entity, damage, kind) {
@@ -3605,7 +3719,21 @@ class Game {
     npc.path = [];
     npc.respawnAt = this.tickCount + (npc.def.respawn || 30);
     player.combat.targetId = null;
-    this.message(player.id, `The ${npc.def.name.toLowerCase()} scampers away, defeated.`);
+
+    if (npc.def.boss) {
+      npc.phasesDone = 0;
+      npc.enraged = false;
+      for (const other of [...this.npcs.values()]) {
+        if (other.summonedBy === npc.id) this.npcs.delete(other.id);
+      }
+      this.broadcastNear(
+        npc.x, npc.y, npc.plane, 'msg',
+        { text: `${npc.def.name} yawns, banks its fire, and settles back down to sleep.`, channel: 'system' }
+      );
+      this.broadcastAll('msg', { text: `${player.name} has calmed ${npc.def.name}!`, channel: 'system' });
+    } else {
+      this.message(player.id, `${capitalise(creatureName(npc.def))} scampers away, defeated.`);
+    }
 
     for (const drop of npc.def.drops || []) {
       if (this.rng() > (drop.chance ?? 1)) continue;
@@ -4211,12 +4339,19 @@ class Game {
 
   tickNpc(npc) {
     if (npc.dead) {
+      // Anything called into a fight leaves for good once it is over.
+      if (npc.temporary) {
+        this.npcs.delete(npc.id);
+        return;
+      }
       if (this.tickCount >= npc.respawnAt) {
         npc.dead = false;
         npc.hp = npc.maxHp;
         npc.x = npc.spawnX;
         npc.y = npc.spawnY;
         npc.anim = null;
+        npc.phasesDone = 0;
+        npc.enraged = false;
       }
       return;
     }
@@ -4230,7 +4365,7 @@ class Game {
         if (combatLevel(player.skills) * 3 < (npc.def.level || 1)) continue;
         if (chebyshev(npc.x, npc.y, player.x, player.y) <= 3) {
           npc.targetId = player.id;
-          this.message(player.id, `The ${npc.def.name.toLowerCase()} takes an interest in you.`);
+          this.message(player.id, `${capitalise(creatureName(npc.def))} takes an interest in you.`);
           break;
         }
       }
@@ -4381,6 +4516,9 @@ class Game {
         level: npc.def.level || 0,
         friendly: Boolean(npc.def.friendly),
         art: npc.def.art,
+        // How large to draw it. A boss drawn the same size as a rat reads as a
+        // rat with a lot of hitpoints.
+        size: npc.def.size || 1,
         anim: npc.anim ? npc.anim.kind : null
       });
     }
@@ -4430,6 +4568,10 @@ class Game {
 }
 
 // ---------------------------------------------------------------- utilities
+
+function capitalise(text) {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
 
 /** Keeps a loaded save on a plane that actually exists. */
 function clampPlane(value) {
@@ -4528,6 +4670,13 @@ const RAW_ITEMS = [
   { id: 'bronze_bar', name: 'Bronze bar', examine: 'Copper and tin, married by fire.', value: 30, shape: 'bar', palette: ['#b87333', '#8a5a2b'] },
   { id: 'iron_bar', name: 'Iron bar', examine: 'Ready for the anvil.', value: 70, shape: 'bar', palette: ['#9aa0a6', '#5f6368'] },
   { id: 'steel_bar', name: 'Steel bar', examine: 'Iron, improved by coal.', value: 150, shape: 'bar', palette: ['#cfd8dc', '#78909c'] },
+  { id: 'mithril_ore', name: 'Mithril ore', examine: 'Blue-green, and lighter than it looks.', value: 90, shape: 'ore', palette: ['#5c7cbf', '#33487a'] },
+  { id: 'mithril_bar', name: 'Mithril bar', examine: 'Rings like a bell when you tap it.', value: 320, shape: 'bar', palette: ['#7d9adf', '#43598f'] },
+  { id: 'adamant_ore', name: 'Adamant ore', examine: 'Dark green, and very heavy indeed.', value: 210, shape: 'ore', palette: ['#3f7a52', '#22452f'] },
+  { id: 'adamant_bar', name: 'Adamant bar', examine: 'It took the furnace a long while.', value: 760, shape: 'bar', palette: ['#4f9166', '#2c5a3d'] },
+  { id: 'ember_shard', name: 'Ember shard', examine: 'Still warm. It will not go out.', value: 400, shape: 'gem', palette: ['#ff8a3d', '#a83c12'] },
+  { id: 'bat_wing', name: 'Bat wing', examine: 'Leathery, and shed naturally.', value: 12, shape: 'pelt', palette: ['#6b5a72', '#3d3242'] },
+  { id: 'crystal_shard', name: 'Crystal shard', examine: 'It hums if you hold it still.', value: 140, shape: 'gem', palette: ['#c9a0ff', '#6c4d99'] },
 
   // --------------------------------------------------------------------- food
   { id: 'raw_shrimp', name: 'Raw shrimp', examine: 'Best not eaten like this.', value: 3, shape: 'fish', palette: ['#ffb3a7', '#d97b6c'] },
@@ -4546,6 +4695,9 @@ const RAW_ITEMS = [
   { id: 'iron_sword', name: 'Iron sword', examine: 'Noticeably heavier.', value: 160, slot: 'weapon', bonuses: { attack: 12, strength: 12, defence: 1 }, requires: { attack: 5 }, shape: 'sword', palette: ['#9aa0a6', '#5f6368'] },
   { id: 'steel_sword', name: 'Steel sword', examine: 'Balanced and bright.', value: 420, slot: 'weapon', bonuses: { attack: 20, strength: 19, defence: 2 }, requires: { attack: 10 }, shape: 'sword', palette: ['#cfd8dc', '#78909c'] },
   { id: 'guardian_blade', name: 'Guardian blade', examine: 'Awarded to defenders of Emberfall.', value: 900, slot: 'weapon', bonuses: { attack: 26, strength: 24, defence: 4 }, requires: { attack: 15 }, shape: 'sword', palette: ['#ffd75e', '#b8860b'] },
+  { id: 'mithril_sword', name: 'Mithril sword', examine: 'Light in the hand, and very sharp.', value: 900, slot: 'weapon', bonuses: { attack: 30, strength: 28, defence: 3 }, requires: { attack: 20 }, shape: 'sword', palette: ['#7d9adf', '#43598f'] },
+  { id: 'adamant_sword', name: 'Adamant sword', examine: 'Heavier than steel, and worth it.', value: 2200, slot: 'weapon', bonuses: { attack: 42, strength: 40, defence: 4 }, requires: { attack: 30 }, shape: 'sword', palette: ['#4f9166', '#2c5a3d'] },
+  { id: 'emberforged_blade', name: 'Emberforged blade', examine: 'Forged in Cinderheart\'s own coals.', value: 6000, slot: 'weapon', bonuses: { attack: 58, strength: 55, defence: 6 }, requires: { attack: 40 }, shape: 'sword', palette: ['#ff8a3d', '#a83c12'] },
 
   // ------------------------------------------------------------------- armour
   { id: 'wooden_shield', name: 'Wooden shield', examine: 'Better than nothing.', value: 20, slot: 'shield', bonuses: { attack: 0, strength: 0, defence: 4 }, shape: 'shield', palette: ['#8b5a2b', '#5c3a1a'] },
@@ -4563,6 +4715,21 @@ const RAW_ITEMS = [
   { id: 'travellers_cape', name: 'Traveller\'s cape', examine: 'Emberfall green.', value: 50, slot: 'cape', bonuses: { attack: 0, strength: 1, defence: 3 }, shape: 'cape', palette: ['#4caf50', '#2e7d32'] },
   { id: 'copper_amulet', name: 'Copper amulet', examine: 'A miner\'s good-luck charm.', value: 90, slot: 'amulet', bonuses: { attack: 3, strength: 2, defence: 1 }, shape: 'amulet', palette: ['#b87333', '#ffd75e'] },
   { id: 'ring_of_tides', name: 'Ring of tides', examine: 'Cool to the touch.', value: 250, slot: 'ring', bonuses: { attack: 2, strength: 2, defence: 2 }, shape: 'ring', palette: ['#5fa8d3', '#bfe6ff'] },
+
+  // ------------------------------------------------- mithril and adamant
+  { id: 'mithril_pickaxe', name: 'Mithril pickaxe', examine: 'Bites through rock like bread.', value: 640, tool: 'pickaxe', power: 3, slot: 'weapon', bonuses: { attack: 9, strength: 10, defence: 0 }, requires: { attack: 20 }, shape: 'pickaxe', palette: ['#7d9adf', '#43598f'] },
+  { id: 'mithril_axe', name: 'Mithril axe', examine: 'Barely notices an oak.', value: 620, tool: 'axe', power: 3, slot: 'weapon', bonuses: { attack: 10, strength: 11, defence: 0 }, requires: { attack: 20 }, shape: 'axe', palette: ['#7d9adf', '#43598f'] },
+  { id: 'mithril_helm', name: 'Mithril helm', examine: 'You forget you are wearing it.', value: 560, slot: 'head', bonuses: { attack: 0, strength: 0, defence: 18 }, requires: { defence: 20 }, shape: 'helm', palette: ['#7d9adf', '#43598f'] },
+  { id: 'mithril_shield', name: 'Mithril shield', examine: 'Wide, and hardly any weight.', value: 820, slot: 'shield', bonuses: { attack: 0, strength: 0, defence: 24 }, requires: { defence: 20 }, shape: 'shield', palette: ['#7d9adf', '#43598f'] },
+  { id: 'mithril_platelegs', name: 'Mithril platelegs', examine: 'You could run in these.', value: 980, slot: 'legs', bonuses: { attack: 0, strength: 0, defence: 28 }, requires: { defence: 20 }, shape: 'legs', palette: ['#7d9adf', '#43598f'] },
+  { id: 'mithril_platebody', name: 'Mithril platebody', examine: 'Proper armour that does not weigh you down.', value: 1500, slot: 'body', bonuses: { attack: 0, strength: 0, defence: 38 }, requires: { defence: 20 }, shape: 'body', palette: ['#7d9adf', '#43598f'] },
+  { id: 'adamant_helm', name: 'Adamant helm', examine: 'Dark green, and utterly solid.', value: 1400, slot: 'head', bonuses: { attack: 0, strength: 0, defence: 26 }, requires: { defence: 30 }, shape: 'helm', palette: ['#4f9166', '#2c5a3d'] },
+  { id: 'adamant_shield', name: 'Adamant shield', examine: 'Nothing in the mine dents it.', value: 2000, slot: 'shield', bonuses: { attack: 0, strength: 0, defence: 34 }, requires: { defence: 30 }, shape: 'shield', palette: ['#4f9166', '#2c5a3d'] },
+  { id: 'adamant_platelegs', name: 'Adamant platelegs', examine: 'Heavy, but you stop noticing.', value: 2400, slot: 'legs', bonuses: { attack: 0, strength: 0, defence: 38 }, requires: { defence: 30 }, shape: 'legs', palette: ['#4f9166', '#2c5a3d'] },
+  { id: 'adamant_platebody', name: 'Adamant platebody', examine: 'The best armour a village smith can make.', value: 3600, slot: 'body', bonuses: { attack: 0, strength: 0, defence: 52 }, requires: { defence: 30 }, shape: 'body', palette: ['#4f9166', '#2c5a3d'] },
+  { id: 'ember_heart', name: 'Ember heart', examine: 'Warm against your collarbone.', value: 4200, slot: 'amulet', bonuses: { attack: 10, strength: 8, defence: 6 }, requires: { attack: 35 }, shape: 'amulet', palette: ['#ff8a3d', '#ffd166'] },
+  { id: 'cinder_cape', name: 'Cinder cape', examine: 'Woven from something that used to burn.', value: 3000, slot: 'cape', bonuses: { attack: 0, strength: 4, defence: 12 }, requires: { defence: 30 }, shape: 'cape', palette: ['#c0562a', '#5f2410'] },
+  { id: 'miners_boots', name: 'Miner\'s boots', examine: 'Steel toes. Mira swears by them.', value: 420, slot: 'boots', bonuses: { attack: 0, strength: 1, defence: 9 }, requires: { defence: 15 }, shape: 'boots', palette: ['#6b5a48', '#3c3226'] },
 
   // -------------------------------------------------------------- quest items
   { id: 'ancient_coin', name: 'Ancient coin', examine: 'Older than the village itself.', value: 0, questItem: true, shape: 'coin', palette: ['#cfd8dc', '#8a9298'] },
@@ -4680,7 +4847,9 @@ __modules["shared/crafting.js"] = function (__exports, __require) {
 const SMELTING = Object.freeze([
   { id: 'bronze_bar', name: 'Bronze bar', level: 1, xp: 7, inputs: [{ id: 'copper_ore', count: 1 }, { id: 'tin_ore', count: 1 }] },
   { id: 'iron_bar', name: 'Iron bar', level: 15, xp: 13, inputs: [{ id: 'iron_ore', count: 1 }], failChance: 0.45, failMessage: 'The ore is too impure and crumbles away.' },
-  { id: 'steel_bar', name: 'Steel bar', level: 30, xp: 18, inputs: [{ id: 'iron_ore', count: 1 }, { id: 'coal', count: 2 }] }
+  { id: 'steel_bar', name: 'Steel bar', level: 30, xp: 18, inputs: [{ id: 'iron_ore', count: 1 }, { id: 'coal', count: 2 }] },
+  { id: 'mithril_bar', name: 'Mithril bar', level: 35, xp: 30, inputs: [{ id: 'mithril_ore', count: 1 }, { id: 'coal', count: 3 }] },
+  { id: 'adamant_bar', name: 'Adamant bar', level: 50, xp: 45, inputs: [{ id: 'adamant_ore', count: 1 }, { id: 'coal', count: 5 }] }
 ]);
 const SMITHING = Object.freeze([
   { id: 'bronze_dagger', name: 'Bronze dagger', level: 1, xp: 13, bar: 'bronze_bar', bars: 1 },
@@ -4697,7 +4866,18 @@ const SMITHING = Object.freeze([
   { id: 'steel_sword', name: 'Steel sword', level: 34, xp: 100, bar: 'steel_bar', bars: 2 },
   { id: 'steel_helm', name: 'Steel helm', level: 37, xp: 100, bar: 'steel_bar', bars: 2 },
   { id: 'steel_shield', name: 'Steel shield', level: 42, xp: 150, bar: 'steel_bar', bars: 3 },
-  { id: 'steel_platebody', name: 'Steel platebody', level: 48, xp: 250, bar: 'steel_bar', bars: 5 }
+  { id: 'steel_platebody', name: 'Steel platebody', level: 48, xp: 250, bar: 'steel_bar', bars: 5 },
+  { id: 'mithril_pickaxe', name: 'Mithril pickaxe', level: 40, xp: 150, bar: 'mithril_bar', bars: 1 },
+  { id: 'mithril_axe', name: 'Mithril axe', level: 40, xp: 150, bar: 'mithril_bar', bars: 1 },
+  { id: 'mithril_sword', name: 'Mithril sword', level: 43, xp: 200, bar: 'mithril_bar', bars: 2 },
+  { id: 'mithril_helm', name: 'Mithril helm', level: 46, xp: 200, bar: 'mithril_bar', bars: 2 },
+  { id: 'mithril_shield', name: 'Mithril shield', level: 50, xp: 300, bar: 'mithril_bar', bars: 3 },
+  { id: 'mithril_platelegs', name: 'Mithril platelegs', level: 54, xp: 400, bar: 'mithril_bar', bars: 4 },
+  { id: 'mithril_platebody', name: 'Mithril platebody', level: 58, xp: 500, bar: 'mithril_bar', bars: 5 },
+  { id: 'adamant_helm', name: 'Adamant helm', level: 62, xp: 400, bar: 'adamant_bar', bars: 2 },
+  { id: 'adamant_shield', name: 'Adamant shield', level: 66, xp: 600, bar: 'adamant_bar', bars: 3 },
+  { id: 'adamant_platelegs', name: 'Adamant platelegs', level: 70, xp: 800, bar: 'adamant_bar', bars: 4 },
+  { id: 'adamant_platebody', name: 'Adamant platebody', level: 74, xp: 1000, bar: 'adamant_bar', bars: 5 }
 ]);
 const COOKING = Object.freeze({
   raw_shrimp: { result: 'shrimp', level: 1, xp: 30, burnStop: 34 },
@@ -4736,6 +4916,7 @@ __modules["shared/npcs.js"] = function (__exports, __require) {
  * rather than gruesome, "defeated" creatures scamper off, and no NPC ever says
  * anything a parent would mind reading over a shoulder.
  */
+const { mineRoom } = __require("shared/world.js");
 const NPC_TYPES = Object.freeze({
   // ------------------------------------------------------------- townsfolk
   mayor_aldric: {
@@ -4823,6 +5004,124 @@ const NPC_TYPES = Object.freeze({
       { id: 'coins', min: 5, max: 30, chance: 0.8 },
       { id: 'meadow_flower', chance: 0.3 }
     ]
+  },
+
+  // ------------------------------------------------- Copper Hollow Mine (1)
+  cave_bat: {
+    name: 'Cave bat', art: 'bat', examine: 'It would rather you turned the light off.',
+    level: 7, hp: 16, maxHit: 2, attack: 7, defence: 5, aggressive: false, respawn: 28,
+    drops: [
+      { id: 'coins', min: 4, max: 26, chance: 0.8 },
+      { id: 'bat_wing', chance: 0.45 }
+    ]
+  },
+  tunnel_crawler: {
+    name: 'Tunnel crawler', art: 'crawler', examine: 'Many legs, no manners.',
+    level: 12, hp: 28, maxHit: 4, attack: 12, defence: 9, aggressive: false, respawn: 34,
+    drops: [
+      { id: 'coins', min: 8, max: 48, chance: 0.85 },
+      { id: 'copper_ore', min: 1, max: 3, chance: 0.3 },
+      { id: 'tin_ore', min: 1, max: 3, chance: 0.3 }
+    ]
+  },
+  dust_sprite: {
+    name: 'Dust sprite', art: 'sprite', examine: 'A small cloud with opinions.',
+    level: 17, hp: 34, maxHit: 5, attack: 17, defence: 12, aggressive: true, respawn: 42,
+    drops: [
+      { id: 'coins', min: 15, max: 80, chance: 0.9 },
+      { id: 'iron_ore', min: 1, max: 3, chance: 0.35 },
+      { id: 'torch', chance: 0.14 }
+    ]
+  },
+
+  // ----------------------------------------------------- The Deep Seam (2)
+  coal_lurker: {
+    name: 'Coal lurker', art: 'lurker', examine: 'It hides in the coal and hopes.',
+    level: 25, hp: 54, maxHit: 7, attack: 25, defence: 18, aggressive: false, respawn: 48,
+    drops: [
+      { id: 'coins', min: 25, max: 140, chance: 0.9 },
+      { id: 'coal', min: 2, max: 6, chance: 0.6 },
+      { id: 'iron_ore', min: 1, max: 4, chance: 0.3 }
+    ]
+  },
+  shale_hound: {
+    name: 'Shale hound', art: 'hound', examine: 'Grey, quick, and made mostly of slate.',
+    level: 31, hp: 68, maxHit: 9, attack: 31, defence: 22, aggressive: true, respawn: 54,
+    drops: [
+      { id: 'coins', min: 40, max: 210, chance: 0.92 },
+      { id: 'coal', min: 2, max: 8, chance: 0.55 },
+      { id: 'mithril_ore', chance: 0.12 },
+      { id: 'miners_boots', chance: 0.05 }
+    ]
+  },
+  deep_golem: {
+    name: 'Deep golem', art: 'deep_golem', examine: 'A rock golem that never saw the sun.',
+    level: 37, hp: 88, maxHit: 11, attack: 37, defence: 30, aggressive: true, respawn: 66, size: 1.15,
+    drops: [
+      { id: 'coins', min: 70, max: 320, chance: 0.94 },
+      { id: 'mithril_ore', min: 1, max: 3, chance: 0.35 },
+      { id: 'coal', min: 3, max: 9, chance: 0.5 },
+      { id: 'mithril_bar', chance: 0.1 }
+    ]
+  },
+  crystal_beetle: {
+    name: 'Crystal beetle', art: 'beetle', examine: 'Its shell chimes when it walks.',
+    level: 41, hp: 82, maxHit: 10, attack: 41, defence: 32, aggressive: false, respawn: 70,
+    drops: [
+      { id: 'coins', min: 80, max: 360, chance: 0.94 },
+      { id: 'crystal_shard', chance: 0.5 },
+      { id: 'mithril_bar', chance: 0.16 },
+      { id: 'mithril_helm', chance: 0.04 }
+    ]
+  },
+
+  // -------------------------------------------------- The Ember Chamber (3)
+  ember_wisp: {
+    name: 'Ember wisp', art: 'wisp', examine: 'A spark that got away from the fire.',
+    level: 30, hp: 42, maxHit: 7, attack: 33, defence: 16, aggressive: true, respawn: 40,
+    drops: [
+      { id: 'coins', min: 30, max: 160, chance: 0.85 },
+      { id: 'ember_shard', chance: 0.2 }
+    ]
+  },
+  cinder_guardian: {
+    name: 'Cinder guardian', art: 'guardian_statue', examine: 'It has stood here a very long time.',
+    level: 53, hp: 105, maxHit: 12, attack: 53, defence: 40, aggressive: true, respawn: 90, size: 1.3,
+    drops: [
+      { id: 'coins', min: 150, max: 620, chance: 0.96 },
+      { id: 'ember_shard', chance: 0.4 },
+      { id: 'adamant_ore', min: 1, max: 2, chance: 0.25 },
+      { id: 'adamant_bar', chance: 0.08 }
+    ]
+  },
+
+  /**
+   * Cinderheart, the whole point of the descent.
+   *
+   * It is not a monster so much as a very large, very warm creature having a
+   * bad dream: defeat it and it yawns, banks its fire and goes back to sleep.
+   * Mechanically it is the only NPC with phases - at two thirds and one third
+   * health it wakes further, calls wisps to it, and finally stokes itself.
+   */
+  cinderheart: {
+    name: 'Cinderheart', art: 'cinderheart', examine: 'Enormous, warm, and fast asleep. Mostly.', proper: true,
+    level: 72, hp: 190, maxHit: 15, attack: 70, defence: 44, aggressive: true, respawn: 300,
+    wander: 0, leash: 16, size: 2.4,
+    boss: {
+      summon: 'ember_wisp',
+      phases: [
+        { at: 0.66, summon: 2, say: 'Cinderheart stirs, and sparks scatter from its back.' },
+        { at: 0.33, summon: 3, enrage: true, say: 'Cinderheart sits up properly. The whole chamber glows.' }
+      ]
+    },
+    drops: [
+      { id: 'coins', min: 800, max: 2600, chance: 1 },
+      { id: 'adamant_bar', min: 2, max: 5, chance: 0.9 },
+      { id: 'ember_shard', min: 2, max: 4, chance: 0.8 },
+      { id: 'cinder_cape', chance: 0.4 },
+      { id: 'ember_heart', chance: 0.3 },
+      { id: 'emberforged_blade', chance: 0.28 }
+    ]
   }
 });
 
@@ -4853,8 +5152,65 @@ const NPC_SPAWNS = Object.freeze([
 
   // Copper Hollow
   ...gridSpawns('cave_imp', 11, 38, 3, 2, 7),
-  ...gridSpawns('rock_golem', 10, 58, 2, 2, 7)
+  ...gridSpawns('rock_golem', 10, 58, 2, 2, 7),
+
+  // --------------------------------------------------------------- the mine
+  // Spawns are addressed by room, so moving a gallery in the floor plan moves
+  // whatever lives in it. Every level ramps upwards away from its ladder.
+  ...roomSpawns(1, 'copper', 'cave_bat', 3),
+  ...roomSpawns(1, 'tin', 'cave_bat', 2),
+  ...roomSpawns(1, 'gallery', 'tunnel_crawler', 3),
+  ...roomSpawns(1, 'iron', 'tunnel_crawler', 2),
+  ...roomSpawns(1, 'coal', 'dust_sprite', 3),
+  ...roomSpawns(1, 'hollow', 'dust_sprite', 2),
+  ...roomSpawns(1, 'descent', 'cave_imp', 2),
+
+  ...roomSpawns(2, 'crossing', 'coal_lurker', 3),
+  ...roomSpawns(2, 'seam', 'coal_lurker', 2),
+  ...roomSpawns(2, 'fungus', 'shale_hound', 3),
+  ...roomSpawns(2, 'hall', 'shale_hound', 2),
+  ...roomSpawns(2, 'coalface', 'deep_golem', 3),
+  ...roomSpawns(2, 'vault', 'crystal_beetle', 3),
+  ...roomSpawns(2, 'descent', 'deep_golem', 2),
+
+  ...roomSpawns(3, 'approach', 'ember_wisp', 3),
+  ...roomSpawns(3, 'hall', 'cinder_guardian', 4),
+  ...bossSpawn(3, 'hall', 'cinderheart')
 ]);
+
+/**
+ * Spreads `count` creatures evenly across a named mine room, each wandering
+ * inside that room rather than inside a fixed square drawn around itself: a
+ * gallery is the right size for a patrol, and nothing wanders into rock.
+ */
+function roomSpawns(plane, roomId, type, count) {
+  const room = mineRoom(plane, roomId);
+  if (!room) return [];
+  const area = { x: room.x + 1, y: room.y + 1, w: Math.max(1, room.w - 2), h: Math.max(1, room.h - 2) };
+  const out = [];
+  for (let i = 0; i < count; i += 1) {
+    // Golden-ratio stepping scatters them without clumping or lining up.
+    const fx = (i * 0.618033988749895) % 1;
+    const fy = (i * 0.381966011250105 + 0.27) % 1;
+    out.push({
+      type,
+      plane,
+      x: area.x + Math.floor(fx * area.w),
+      y: area.y + Math.floor(fy * area.h),
+      area
+    });
+  }
+  return out;
+}
+
+/** One boss, in the middle of its hall, patrolling nothing. */
+function bossSpawn(plane, roomId, type) {
+  const room = mineRoom(plane, roomId);
+  if (!room) return [];
+  const x = room.x + Math.floor(room.w / 2);
+  const y = room.y + Math.floor(room.h / 2);
+  return [{ type, plane, x, y, area: { x, y, w: 1, h: 1 } }];
+}
 
 function gridSpawns(type, x0, y0, cols, rows, spacing) {
   const out = [];
@@ -4871,9 +5227,20 @@ function npcDef(type) {
   return NPC_TYPES[type] || null;
 }
 
+/**
+ * How to refer to a creature in a sentence. Most are things ("the giant rat");
+ * a few have names ("Cinderheart"), and putting "the" in front of a name reads
+ * like a mistake.
+ */
+function creatureName(def) {
+  if (!def) return 'something';
+  return def.proper ? def.name : `the ${def.name.toLowerCase()}`;
+}
+
   __exports.NPC_TYPES = NPC_TYPES;
   __exports.NPC_SPAWNS = NPC_SPAWNS;
   __exports.npcDef = npcDef;
+  __exports.creatureName = creatureName;
 };
 
 __modules["shared/quests.js"] = function (__exports, __require) {
@@ -5358,14 +5725,30 @@ function playerCombatStats(player) {
   };
 }
 
+/**
+ * The strength bonus an NPC needs in order to hit exactly as hard as its
+ * definition says.
+ *
+ * `maxHit` in an NPC definition is meant to be read literally - "this creature
+ * can take four hitpoints off you" - but max hit is a function of both strength
+ * level and strength bonus, and an NPC's strength level rises with its attack.
+ * Multiplying `maxHit` by a constant only lines up while the two happen to be
+ * similar; by the time a creature attacks at 70 it hits for twice what its
+ * definition claims. So invert `maxHit` instead and solve for the bonus.
+ */
+function strengthBonusForMaxHit(strengthLevel, wanted) {
+  return Math.max(0, Math.round((640 * wanted) / (strengthLevel + 8) - 64));
+}
+
 /** Builds the stat block for an NPC from its definition. */
 function npcCombatStats(def) {
+  const level = def.attack ?? 1;
   return {
-    attackLevel: def.attack ?? 1,
-    strengthLevel: def.attack ?? 1,
+    attackLevel: level,
+    strengthLevel: level,
     defenceLevel: def.defence ?? 1,
-    attackBonus: Math.round((def.attack ?? 1) * 1.2),
-    strengthBonus: Math.round((def.maxHit ?? 1) * 12),
+    attackBonus: Math.round(level * 1.2),
+    strengthBonus: strengthBonusForMaxHit(level, def.maxHit ?? 1),
     defenceBonus: Math.round((def.defence ?? 1) * 1.4),
     style: 'accurate'
   };
@@ -5380,6 +5763,7 @@ function npcCombatStats(def) {
   __exports.resolveAttack = resolveAttack;
   __exports.combatXp = combatXp;
   __exports.playerCombatStats = playerCombatStats;
+  __exports.strengthBonusForMaxHit = strengthBonusForMaxHit;
   __exports.npcCombatStats = npcCombatStats;
 };
 
@@ -6596,21 +6980,25 @@ class Renderer {
     let y;
     let flip = false;
 
+    // Most creatures are person-sized; a few are not, and how large one is
+    // drawn is the only warning a player gets before they click on it.
+    const bulk = entity.size || 1;
+
     if (iso) {
       const facing = isoFacing(entity.dir);
       flip = facing.flip;
       sprite = isPlayer
         ? isoPlayerSprite(entity.appearance || state.appearance, entity.look, frame, facing.view)
         : isoNpcSprite(entity.art, frame, facing.view);
-      w = ISO_CHAR_W * this.scale;
-      h = ISO_CHAR_H * this.scale;
+      w = ISO_CHAR_W * this.scale * bulk;
+      h = ISO_CHAR_H * this.scale * bulk;
       x = Math.round(p.x - w / 2);
       y = Math.round(p.y + this.halfH * 0.55 - h);
     } else {
       sprite = isPlayer
         ? playerSprite(entity.appearance || state.appearance, entity.look, frame, 32)
         : npcSprite(entity.art, frame, 32);
-      w = this.tileSize * 1.15;
+      w = this.tileSize * 1.15 * bulk;
       h = w * 1.5;
       x = Math.round(p.x - w / 2);
       y = Math.round(p.y - this.tileSize * 0.5 - h + this.tileSize);
@@ -7288,6 +7676,8 @@ const OBJECT_PAINTERS = {
   rock_tin: (ctx, w, h) => drawRock(ctx, w, h, '#c9c9c9'),
   rock_iron: (ctx, w, h) => drawRock(ctx, w, h, '#a2543f'),
   rock_coal: (ctx, w, h) => drawRock(ctx, w, h, '#2f3336'),
+  rock_mithril: (ctx, w, h) => drawRock(ctx, w, h, '#5c7cbf'),
+  rock_adamant: (ctx, w, h) => drawRock(ctx, w, h, '#3f7a52'),
   rock_spent: (ctx, w, h) => drawRock(ctx, w, h, null),
   fish_spot: (ctx, w, h) => {
     ctx.strokeStyle = 'rgba(255,255,255,0.65)';
@@ -7494,19 +7884,126 @@ const CREATURE_PAINTERS = {
   boar: (ctx, w, h) => drawBeast(ctx, w, h, '#7a5a44', '#5b4230', 0.7),
   goblin: (ctx, w, h) => drawHumanoid(ctx, w, h, { shirt: '#6b8f3a', legs: '#4a5c2a', skin: '#7fa050', hair: '#3f5220' }, 0.82),
   imp: (ctx, w, h) => drawHumanoid(ctx, w, h, { shirt: '#8e44ad', legs: '#5b2c6f', skin: '#c0679a', hair: '#2b1030' }, 0.7),
-  golem: (ctx, w, h) => {
-    ctx.fillStyle = '#6d675e';
-    ctx.fillRect(w * 0.22, h * 0.3, w * 0.56, h * 0.55);
-    ctx.fillStyle = '#57514a';
-    ctx.fillRect(w * 0.3, h * 0.16, w * 0.4, h * 0.2);
-    ctx.fillStyle = '#b87333';
-    ctx.fillRect(w * 0.38, h * 0.22, w * 0.08, h * 0.06);
-    ctx.fillRect(w * 0.56, h * 0.22, w * 0.08, h * 0.06);
-    ctx.fillStyle = '#4b463f';
-    ctx.fillRect(w * 0.16, h * 0.38, w * 0.1, h * 0.34);
-    ctx.fillRect(w * 0.74, h * 0.38, w * 0.1, h * 0.34);
-  }
+  golem: (ctx, w, h) => drawStoneFigure(ctx, w, h, '#6d675e', '#57514a', '#4b463f', '#b87333'),
+
+  // ------------------------------------------------------- mine creatures
+  bat: (ctx, w, h) => drawBat(ctx, w, h, '#6b5a72', '#3d3242'),
+  crawler: (ctx, w, h) => drawBeast(ctx, w, h, '#6f5a45', '#4a3a2c', 0.5, true),
+  sprite: (ctx, w, h) => drawGlow(ctx, w, h, '#cbb9a0', '#8a7a63'),
+  lurker: (ctx, w, h) => drawBeast(ctx, w, h, '#3c4043', '#202124', 0.66, true),
+  hound: (ctx, w, h) => drawBeast(ctx, w, h, '#7a8590', '#4a5560', 0.78),
+  deep_golem: (ctx, w, h) => drawStoneFigure(ctx, w, h, '#4a4f5c', '#383d47', '#2f333c', '#7d9adf'),
+  beetle: (ctx, w, h) => drawBeetle(ctx, w, h),
+  wisp: (ctx, w, h) => drawGlow(ctx, w, h, '#ff8a3d', '#c0562a'),
+  guardian_statue: (ctx, w, h) => drawStoneFigure(ctx, w, h, '#6b5a4a', '#4f4237', '#3a3029', '#ff8a3d'),
+  cinderheart: (ctx, w, h) => drawCinderheart(ctx, w, h)
 };
+
+/** A blocky figure carved out of something. Golems and statues share it. */
+function drawStoneFigure(ctx, w, h, body, headColour, limb, eye) {
+  ctx.fillStyle = body;
+  ctx.fillRect(w * 0.22, h * 0.3, w * 0.56, h * 0.55);
+  ctx.fillStyle = headColour;
+  ctx.fillRect(w * 0.3, h * 0.16, w * 0.4, h * 0.2);
+  ctx.fillStyle = eye;
+  ctx.fillRect(w * 0.38, h * 0.22, w * 0.08, h * 0.06);
+  ctx.fillRect(w * 0.56, h * 0.22, w * 0.08, h * 0.06);
+  ctx.fillStyle = limb;
+  ctx.fillRect(w * 0.16, h * 0.38, w * 0.1, h * 0.34);
+  ctx.fillRect(w * 0.74, h * 0.38, w * 0.1, h * 0.34);
+}
+
+function drawBat(ctx, w, h, body, dark) {
+  const cy = h * 0.42;
+  ctx.fillStyle = dark;
+  ctx.beginPath();
+  ctx.moveTo(w * 0.5, cy);
+  ctx.quadraticCurveTo(w * 0.16, cy - h * 0.14, w * 0.04, cy + h * 0.06);
+  ctx.quadraticCurveTo(w * 0.24, cy + h * 0.04, w * 0.5, cy + h * 0.08);
+  ctx.moveTo(w * 0.5, cy);
+  ctx.quadraticCurveTo(w * 0.84, cy - h * 0.14, w * 0.96, cy + h * 0.06);
+  ctx.quadraticCurveTo(w * 0.76, cy + h * 0.04, w * 0.5, cy + h * 0.08);
+  ctx.fill();
+  ctx.fillStyle = body;
+  ctx.beginPath();
+  ctx.ellipse(w * 0.5, cy + h * 0.02, w * 0.12, h * 0.1, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#ffd166';
+  ctx.fillRect(w * 0.45, cy - h * 0.02, 2, 2);
+  ctx.fillRect(w * 0.53, cy - h * 0.02, 2, 2);
+}
+
+/** Wisps and sprites: a bright core inside a soft halo. */
+function drawGlow(ctx, w, h, core, halo) {
+  const cy = h * 0.46;
+  const grad = ctx.createRadialGradient(w * 0.5, cy, 1, w * 0.5, cy, w * 0.44);
+  grad.addColorStop(0, core);
+  grad.addColorStop(0.5, halo);
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(w * 0.5, cy, w * 0.44, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#fff6dc';
+  ctx.beginPath();
+  ctx.arc(w * 0.5, cy, w * 0.1, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawBeetle(ctx, w, h) {
+  const cy = h * 0.55;
+  ctx.strokeStyle = '#3a2c44';
+  ctx.lineWidth = 2;
+  for (let i = -1; i <= 1; i += 1) {
+    ctx.beginPath();
+    ctx.moveTo(w * 0.32, cy + i * h * 0.06);
+    ctx.lineTo(w * 0.16, cy + i * h * 0.1 + h * 0.06);
+    ctx.moveTo(w * 0.68, cy + i * h * 0.06);
+    ctx.lineTo(w * 0.84, cy + i * h * 0.1 + h * 0.06);
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#5b4470';
+  ctx.beginPath();
+  ctx.ellipse(w * 0.5, cy, w * 0.24, h * 0.16, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(201,160,255,0.75)';
+  ctx.beginPath();
+  ctx.moveTo(w * 0.5, cy - h * 0.16);
+  ctx.lineTo(w * 0.62, cy);
+  ctx.lineTo(w * 0.5, cy + h * 0.12);
+  ctx.lineTo(w * 0.38, cy);
+  ctx.closePath();
+  ctx.fill();
+}
+
+/** The boss: a big warm shape with coals showing through the cracks. */
+function drawCinderheart(ctx, w, h) {
+  const cy = h * 0.52;
+  ctx.fillStyle = 'rgba(255,140,60,0.2)';
+  ctx.beginPath();
+  ctx.ellipse(w * 0.5, cy, w * 0.5, h * 0.34, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#4a2a22';
+  ctx.beginPath();
+  ctx.ellipse(w * 0.5, cy, w * 0.4, h * 0.26, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#e2703a';
+  for (let i = 0; i < 5; i += 1) {
+    const a = (i / 5) * Math.PI * 2;
+    ctx.fillRect(w * 0.5 + Math.cos(a) * w * 0.2 - 2, cy + Math.sin(a) * h * 0.13 - 2, 5, 4);
+  }
+  ctx.fillStyle = '#ffd166';
+  ctx.beginPath();
+  ctx.ellipse(w * 0.5, cy - h * 0.02, w * 0.12, h * 0.07, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // Two sleepy eyes.
+  ctx.strokeStyle = '#2b1a14';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(w * 0.4, cy - h * 0.12, 4, 0.2, Math.PI - 0.2);
+  ctx.arc(w * 0.6, cy - h * 0.12, 4, 0.2, Math.PI - 0.2);
+  ctx.stroke();
+}
 
 function drawBeast(ctx, w, h, body, shade, scale, tail = false) {
   const top = h * (1 - scale * 0.55);
@@ -8640,6 +9137,8 @@ const PROPS = {
   rock_tin: (ctx, w, h) => drawIsoRock(ctx, w, h, '#c9c9c9'),
   rock_iron: (ctx, w, h) => drawIsoRock(ctx, w, h, '#a2543f'),
   rock_coal: (ctx, w, h) => drawIsoRock(ctx, w, h, '#2f3336'),
+  rock_mithril: (ctx, w, h) => drawIsoRock(ctx, w, h, '#5c7cbf'),
+  rock_adamant: (ctx, w, h) => drawIsoRock(ctx, w, h, '#3f7a52'),
   rock_spent: (ctx, w, h) => drawIsoRock(ctx, w, h, null),
   fish_spot: (ctx, w, h) => {
     const baseY = h - ISO_TILE_H / 2;
@@ -8798,6 +9297,7 @@ const PROP_HEIGHTS = {
   ladder_down: 44, ladder_up: 76, mine_entrance: 72, mine_cart: 40, brazier: 64,
   tree: 110, oak: 116, willow: 104, stump: 34,
   rock_copper: 56, rock_tin: 56, rock_iron: 56, rock_coal: 56, rock_spent: 56,
+  rock_mithril: 58, rock_adamant: 60,
   fish_spot: 34, bank: 62, counter: 58, furnace: 96, anvil: 56, range: 66,
   fountain: 62, sign: 62, fire: 48
 };
@@ -9024,34 +9524,175 @@ const CREATURES = {
   rat: (ctx, w, h, frame) => drawIsoBeast(ctx, w, h, { body: '#8a7f72', shade: '#6b6157', scale: 0.75, tail: true, frame }),
   wolf: (ctx, w, h, frame) => drawIsoBeast(ctx, w, h, { body: '#8e99a4', shade: '#5f6a75', scale: 1.05, tail: true, frame }),
   boar: (ctx, w, h, frame) => drawIsoBeast(ctx, w, h, { body: '#7a5a44', shade: '#5b4230', scale: 1, tusks: true, frame }),
-  golem: (ctx, w, h) => {
-    const cx = w / 2;
-    const groundY = h - 6;
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.beginPath();
-    ctx.ellipse(cx, groundY, 18, 8, 0, 0, Math.PI * 2);
-    ctx.fill();
-    const stone = '#6d675e';
-    ctx.fillStyle = shade(stone, FACE.left);
-    ctx.fillRect(cx - 14, groundY - 34, 14, 34);
-    ctx.fillStyle = shade(stone, FACE.right);
-    ctx.fillRect(cx, groundY - 34, 14, 34);
-    ctx.fillStyle = shade(stone, FACE.top);
-    ctx.beginPath();
-    ctx.moveTo(cx, groundY - 40);
-    ctx.lineTo(cx + 14, groundY - 34);
-    ctx.lineTo(cx, groundY - 28);
-    ctx.lineTo(cx - 14, groundY - 34);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = shade(stone, 0.72);
-    ctx.fillRect(cx - 22, groundY - 30, 7, 20);
-    ctx.fillRect(cx + 15, groundY - 30, 7, 20);
-    ctx.fillStyle = '#b87333';
-    ctx.fillRect(cx - 7, groundY - 32, 4, 3);
-    ctx.fillRect(cx + 3, groundY - 32, 4, 3);
-  }
+  bat: (ctx, w, h, frame) => drawIsoBat(ctx, w, h, '#6b5a72', '#3d3242', frame),
+  crawler: (ctx, w, h, frame) => drawIsoBeast(ctx, w, h, { body: '#6f5a45', shade: '#4a3a2c', scale: 0.72, tail: true, frame }),
+  sprite: (ctx, w, h, frame) => drawIsoGlow(ctx, w, h, '#cbb9a0', '#8a7a63', frame),
+  lurker: (ctx, w, h, frame) => drawIsoBeast(ctx, w, h, { body: '#3c4043', shade: '#202124', scale: 0.92, tail: true, frame }),
+  hound: (ctx, w, h, frame) => drawIsoBeast(ctx, w, h, { body: '#7a8590', shade: '#4a5560', scale: 1.05, tail: true, frame }),
+  deep_golem: (ctx, w, h) => drawIsoStoneFigure(ctx, w, h, '#4a4f5c', '#7d9adf', 1.05),
+  beetle: (ctx, w, h, frame) => drawIsoBeetle(ctx, w, h, frame),
+  wisp: (ctx, w, h, frame) => drawIsoGlow(ctx, w, h, '#ff8a3d', '#c0562a', frame),
+  guardian_statue: (ctx, w, h) => drawIsoStoneFigure(ctx, w, h, '#6b5a4a', '#ff8a3d', 1.18),
+  cinderheart: (ctx, w, h, frame) => drawIsoCinderheart(ctx, w, h, frame),
+  golem: (ctx, w, h) => drawIsoStoneFigure(ctx, w, h, '#6d675e', '#b87333', 1)
 };
+
+/**
+ * A blocky figure standing on the tile: two shaded body halves, a lit cap and
+ * a pair of arms. Golems, deep golems and the chamber statues share it, which
+ * is what makes them read as a family.
+ */
+function drawIsoStoneFigure(ctx, w, h, stone, eye, scale = 1) {
+  const cx = w / 2;
+  const groundY = h - 6;
+  const body = Math.round(34 * scale);
+  const half = Math.round(14 * scale);
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.beginPath();
+  ctx.ellipse(cx, groundY, 18 * scale, 8 * scale, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = shade(stone, FACE.left);
+  ctx.fillRect(cx - half, groundY - body, half, body);
+  ctx.fillStyle = shade(stone, FACE.right);
+  ctx.fillRect(cx, groundY - body, half, body);
+  ctx.fillStyle = shade(stone, FACE.top);
+  ctx.beginPath();
+  ctx.moveTo(cx, groundY - body - 6);
+  ctx.lineTo(cx + half, groundY - body);
+  ctx.lineTo(cx, groundY - body + 6);
+  ctx.lineTo(cx - half, groundY - body);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = shade(stone, 0.72);
+  ctx.fillRect(cx - half - 8, groundY - body * 0.88, 7, body * 0.6);
+  ctx.fillRect(cx + half + 1, groundY - body * 0.88, 7, body * 0.6);
+  ctx.fillStyle = eye;
+  ctx.fillRect(cx - 7, groundY - body + 2, 4, 3);
+  ctx.fillRect(cx + 3, groundY - body + 2, 4, 3);
+}
+
+function drawIsoBat(ctx, w, h, body, dark, frame) {
+  const cx = w / 2;
+  const cy = h - 30 - (frame % 2) * 3;
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.beginPath();
+  ctx.ellipse(cx, h - 6, 10, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  const spread = frame % 2 ? 20 : 15;
+  ctx.fillStyle = dark;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.quadraticCurveTo(cx - spread, cy - 9, cx - spread - 4, cy + 5);
+  ctx.quadraticCurveTo(cx - spread * 0.5, cy + 3, cx, cy + 5);
+  ctx.moveTo(cx, cy);
+  ctx.quadraticCurveTo(cx + spread, cy - 9, cx + spread + 4, cy + 5);
+  ctx.quadraticCurveTo(cx + spread * 0.5, cy + 3, cx, cy + 5);
+  ctx.fill();
+  ctx.fillStyle = body;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + 1, 6, 7, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#ffd166';
+  ctx.fillRect(cx - 3, cy - 2, 2, 2);
+  ctx.fillRect(cx + 1, cy - 2, 2, 2);
+}
+
+function drawIsoGlow(ctx, w, h, core, halo, frame) {
+  const cx = w / 2;
+  const cy = h - 26 - (frame % 2) * 2;
+  const r = 17 + (frame % 2);
+  const grad = ctx.createRadialGradient(cx, cy, 1, cx, cy, r);
+  grad.addColorStop(0, core);
+  grad.addColorStop(0.45, halo);
+  grad.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#fff6dc';
+  ctx.beginPath();
+  ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawIsoBeetle(ctx, w, h, frame) {
+  const cx = w / 2;
+  const groundY = h - 8;
+  ctx.fillStyle = 'rgba(0,0,0,0.28)';
+  ctx.beginPath();
+  ctx.ellipse(cx, groundY + 2, 15, 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#3a2c44';
+  ctx.lineWidth = 2;
+  for (let i = -1; i <= 1; i += 1) {
+    const lift = (frame % 2 ? i : -i) * 2;
+    ctx.beginPath();
+    ctx.moveTo(cx - 9, groundY - 8 + i * 3);
+    ctx.lineTo(cx - 18, groundY - 1 + i * 2 + lift);
+    ctx.moveTo(cx + 9, groundY - 8 + i * 3);
+    ctx.lineTo(cx + 18, groundY - 1 + i * 2 - lift);
+    ctx.stroke();
+  }
+  ctx.fillStyle = shade('#5b4470', FACE.left);
+  ctx.beginPath();
+  ctx.ellipse(cx, groundY - 9, 13, 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(201,160,255,0.8)';
+  ctx.beginPath();
+  ctx.moveTo(cx, groundY - 19);
+  ctx.lineTo(cx + 7, groundY - 10);
+  ctx.lineTo(cx, groundY - 3);
+  ctx.lineTo(cx - 7, groundY - 10);
+  ctx.closePath();
+  ctx.fill();
+}
+
+/**
+ * Cinderheart. Bigger than anything else in the world, and drawn to look warm
+ * rather than dangerous: it is a creature having a bad dream, not a demon.
+ */
+function drawIsoCinderheart(ctx, w, h, frame) {
+  const cx = w / 2;
+  const groundY = h - 4;
+  const breathe = (frame % 2) * 2;
+
+  ctx.fillStyle = 'rgba(255,140,60,0.18)';
+  ctx.beginPath();
+  ctx.ellipse(cx, groundY - 4, 26, 11, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = shade('#4a2a22', FACE.left);
+  ctx.beginPath();
+  ctx.ellipse(cx, groundY - 20 - breathe, 22, 17, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = shade('#5c3428', FACE.top);
+  ctx.beginPath();
+  ctx.ellipse(cx, groundY - 26 - breathe, 18, 11, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Coals showing through the cracks in its back.
+  ctx.fillStyle = '#e2703a';
+  for (let i = 0; i < 6; i += 1) {
+    const a = (i / 6) * Math.PI * 2;
+    ctx.fillRect(cx + Math.cos(a) * 13 - 2, groundY - 26 - breathe + Math.sin(a) * 7 - 1, 4, 3);
+  }
+  ctx.fillStyle = '#ffd166';
+  ctx.beginPath();
+  ctx.ellipse(cx, groundY - 24 - breathe, 7, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Head, and two sleepy eyes.
+  ctx.fillStyle = shade('#4a2a22', FACE.right);
+  ctx.beginPath();
+  ctx.ellipse(cx + 12, groundY - 34 - breathe, 11, 9, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#ffd166';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(cx + 9, groundY - 36 - breathe, 3, 0.25, Math.PI - 0.25);
+  ctx.arc(cx + 16, groundY - 36 - breathe, 3, 0.25, Math.PI - 0.25);
+  ctx.stroke();
+}
 function isoNpcSprite(art, frame, facing) {
   const key = `npc:${art}:${frame}:${facing}`;
   return cached(key, CHAR_W, CHAR_H, (ctx, w, h) => {
