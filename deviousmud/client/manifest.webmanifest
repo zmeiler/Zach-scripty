@@ -1,0 +1,19 @@
+{
+  "name": "DeviousMud - Emberfall",
+  "short_name": "DeviousMud",
+  "description": "A family-friendly browser MMORPG. Explore Emberfall, train ten skills, finish quests and adventure with friends.",
+  "id": "/client/",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["fullscreen", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#131a22",
+  "theme_color": "#1b2430",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
