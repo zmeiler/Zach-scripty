@@ -473,6 +473,33 @@ third fought the boss through both phases by clicking its sprite. Reading those
 screenshots is what found the boss-size problem and the "the cinderheart"
 wording, neither of which any test would have flagged.
 
+### Bug: "Dungeon not visible"
+
+Three words of feedback, and the most useful of the project. The mine rendered
+perfectly. It was also, in practice, invisible: a small brown timbered prop
+twenty tiles into the far-west quarry, low-contrast against brown gravel among
+forty rock props, unmarked on the minimap, mentioned by nobody unless you had
+already finished a multi-hour quest chain.
+
+I had built the content and never built the road to it. The fix was four things,
+none of them in the engine:
+
+* **Move it.** The mouth now sits three tiles inside the quarry on the road line,
+  straight ahead as you arrive from the village, with a gravel path leading in.
+* **Make it loud.** Heavier timbers, a lamp burning on the lintel, a glow from
+  the shaft, and a brazier either side. The flame is the part that works — a
+  moving light is the one thing on a screen of grey rock the eye goes to.
+* **Put it on the map.** The minimap now marks any object carrying a `link`, on
+  every plane, orange for down and blue for up. Underground this turned out to
+  matter even more than on the surface.
+* **Say it out loud.** Tutor Pip and Miner Mira both mention the shaft to a
+  character who has done nothing at all, and the signposts name it.
+
+Each of those is now a test, because "is this findable?" is exactly the kind of
+property that decays silently. The lesson generalises: I verified the mine by
+teleporting a scripted player to the entrance, which tested everything except
+the only question a real player asks first — *where is it?*
+
 ---
 
 ## What I would do next

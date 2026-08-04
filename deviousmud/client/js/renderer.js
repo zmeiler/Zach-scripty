@@ -846,6 +846,20 @@ export class Minimap {
         ctx.fillRect(obj.x * this.scale, obj.y * this.scale, this.scale, this.scale);
       }
     }
+
+    // Ways between levels, marked loudly. A player who cannot find the stairs
+    // has no dungeon, however much of one you built - so these are drawn last,
+    // larger than a tile, and in the one colour nothing else on the map uses.
+    for (const obj of level.objects) {
+      if (!obj.link) continue;
+      const size = this.scale * 3;
+      const x = obj.x * this.scale - this.scale;
+      const y = obj.y * this.scale - this.scale;
+      ctx.fillStyle = '#0c1116';
+      ctx.fillRect(x - 1, y - 1, size + 2, size + 2);
+      ctx.fillStyle = obj.link.plane > obj.plane ? '#ff8a3d' : '#7fd4ff';
+      ctx.fillRect(x, y, size, size);
+    }
     return off;
   }
 

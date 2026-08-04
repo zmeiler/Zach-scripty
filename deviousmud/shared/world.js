@@ -236,9 +236,11 @@ export function buildWorld(seed = WORLD_SEED) {
     const y = 34 + Math.floor(rng() * 30);
     if (rng() < 0.35) tiles[idx(x, y)] = TILE.GRAVEL;
   }
-  // Quarry mouth on the east wall, aligned with the main road.
+  // Quarry mouth on the east wall, aligned with the main road, and a worked
+  // path running from it to the shaft so there is a line to follow.
   fillRect(tiles, 29, 50, 2, 3, TILE.GRAVEL);
   tiles[idx(29, 51)] = TILE.GRAVEL;
+  fillRect(tiles, 22, 50, 9, 3, TILE.GRAVEL);
 
   // --- Roads ---------------------------------------------------------------
   road(tiles, 28, 51, 66, 51, 3);          // west quarry -> village -> lake
@@ -319,9 +321,15 @@ function nearRoad(x, y) {
 function placeObjects(world, rng) {
   const { tiles } = world;
 
-  // The mine mouth is claimed before the ore scatter, so a randomly placed rock
-  // can never sit on the one tile that has to stay clear.
-  world.mineEntrance = addObject(world, 'mine_entrance', 10, 50);
+  // The mine mouth sits three tiles inside the quarry, straight ahead on the
+  // road you arrive by - the first version was twenty tiles further west, where
+  // it read as one more rock among forty. It is claimed before the ore scatter
+  // so a randomly placed rock can never take its tile, and flanked by braziers
+  // because a moving flame is the one thing on this screen the eye goes to.
+  world.mineEntrance = addObject(world, 'mine_entrance', 24, 51);
+  addObject(world, 'brazier', 24, 49);
+  addObject(world, 'brazier', 24, 53);
+  addObject(world, 'signpost', 27, 52);
 
   // Whispering Woods: ordinary trees everywhere, oaks in clusters, willows by
   // the northern lake shore.

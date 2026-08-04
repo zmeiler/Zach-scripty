@@ -88,6 +88,7 @@ export const DIALOGUE = Object.freeze({
           { text: 'How do I move and fight?', next: 'controls' },
           { text: 'How do skills work?', next: 'skills' },
           { text: 'What can I do around here?', next: 'activities' },
+          { text: 'Is there anywhere I should not go?', next: 'mine' },
           { text: 'Can you top me up?', next: 'heal' },
           { text: 'Nothing, thanks.', next: null }
         ]
@@ -105,6 +106,19 @@ export const DIALOGUE = Object.freeze({
       activities: {
         speaker: 'npc',
         text: 'Trees north, rocks west, fish east, creatures south. Bea sells tools, Cyrus minds your bank, and the smithy behind me turns ore into swords.',
+        options: [{ text: 'Anything else?', next: 'greet' }]
+      },
+      mine: {
+        speaker: 'npc',
+        text: 'West, in Copper Hollow, there is a shaft going down under the quarry. Two braziers burning either side of it - you cannot miss them. It goes down a long way, and it is very dark.',
+        options: [
+          { text: 'Can I go down it?', next: 'mine_yes' },
+          { text: 'Anything else?', next: 'greet' }
+        ]
+      },
+      mine_yes: {
+        speaker: 'npc',
+        text: 'Anyone can. Buy a torch from Bea first - a few coins, and worth every one. Mira knows more about what is down there than I do.',
         options: [{ text: 'Anything else?', next: 'greet' }]
       },
       heal: {
@@ -231,8 +245,14 @@ export const DIALOGUE = Object.freeze({
         text: 'Copper and tin near the mouth, iron in the middle, coal at the back. Smelt one copper with one tin and you have bronze.',
         options: [
           { text: 'How do I smelt?', next: 'smelt' },
+          { text: 'What is that shaft with the braziers?', next: 'shaft' },
           { text: 'Thanks.', next: null }
         ]
+      },
+      shaft: {
+        speaker: 'npc',
+        text: 'The old mine. Three levels that I know of, and warmer every one. Go down if you like - take a light, and do not be proud about coming back up.',
+        options: [{ text: 'Thanks.', next: null }]
       },
       smelt: {
         speaker: 'npc',

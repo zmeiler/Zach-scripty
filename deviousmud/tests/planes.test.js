@@ -15,6 +15,7 @@ import { findPath } from '../shared/engine/pathfinding.js';
 import { OBJECT_TYPES, buildWorld, checksumWorld, isWalkable, makeRng, planeAt, planeDarkness, planeLights, objectAt, regionAt } from '../shared/world.js';
 import { PLANE_COUNT, SPAWN_POINT, SURFACE, TILE, VIEW_RADIUS } from '../shared/constants.js';
 import { NPC_TYPES } from '../shared/npcs.js';
+import { DIALOGUE } from '../shared/dialogue.js';
 import { getItem } from '../shared/items.js';
 import { SMELTING, SMITHING } from '../shared/crafting.js';
 import { maxHit, npcCombatStats } from '../shared/engine/combat.js';
@@ -105,6 +106,58 @@ test('the mine is reachable from the village on foot', () => {
   assert.ok(entrance, 'Copper Hollow needs a mouth');
   const path = findPath(world, SPAWN_POINT.x, SPAWN_POINT.y, entrance.x, entrance.y, { range: 1, plane: SURFACE });
   assert.ok(path.length > 0, 'you should be able to walk to the mine entrance');
+});
+
+/**
+ * The first version of the mine was invisible in practice: a small brown prop
+ * twenty tiles into the far-west quarry, unmarked on the map, mentioned by
+ * nobody. A dungeon a player cannot find is not a dungeon, so the things that
+ * make it findable are now assertions rather than good intentions.
+ */
+test('the mine mouth is somewhere a player will walk past', () => {
+  const world = buildWorld();
+  const entrance = world.mineEntrance;
+
+  // The main road runs east-west at y = 51. The mouth should be on that line,
+  // close enough to the quarry entrance to be on screen when you arrive.
+  assert.ok(Math.abs(entrance.y - 51) <= 1, 'the mouth should sit on the road line');
+  assert.ok(entrance.x >= 20, 'and near the quarry entrance, not at the far wall');
+
+  // You can stand next to it, from the direction you approach.
+  assert.ok(isWalkable(world, entrance.x + 1, entrance.y, SURFACE));
+});
+
+test('the mine mouth is lit and signposted', () => {
+  const world = buildWorld();
+  const entrance = world.mineEntrance;
+  const near = (type, radius) => world.objects.some(
+    (obj) => obj.type === type && Math.max(Math.abs(obj.x - entrance.x), Math.abs(obj.y - entrance.y)) <= radius
+  );
+  assert.ok(near('brazier', 3), 'a burning flame is the one thing the eye reliably finds');
+  assert.ok(near('signpost', 5), 'and something that says what it is');
+});
+
+test('somebody in the village will tell you the mine exists', () => {
+  // Not gated behind a quest: the text has to be reachable by a brand new
+  // character who has spoken to nobody.
+  const mentions = [];
+  for (const [npcType, tree] of Object.entries(DIALOGUE)) {
+    for (const node of Object.values(tree.nodes)) {
+      if (/shaft|mine/i.test(node.text || '')) mentions.push(npcType);
+    }
+  }
+  assert.ok(mentions.includes('tutor_pip'), 'the tutorial NPC should know about it');
+  assert.ok(mentions.includes('miner_mira'), 'so should the miner');
+});
+
+test('every way between levels is marked on that plane', () => {
+  // The minimap draws a marker for any object carrying a `link`, so this is the
+  // property the marker code depends on.
+  const world = buildWorld();
+  for (let plane = 0; plane < PLANE_COUNT; plane += 1) {
+    const marked = planeAt(world, plane).objects.filter((obj) => obj.link);
+    assert.ok(marked.length > 0, `plane ${plane} has no marked way off it`);
+  }
 });
 
 test('each plane names itself', () => {

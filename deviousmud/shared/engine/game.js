@@ -817,9 +817,10 @@ export class Game {
     if (obj.type === 'mine_cart') return 'The cart holds nothing but grit and one very old glove.';
     if (obj.plane === 1) return 'Chalked on the rock: "Copper and tin above, iron and coal below. Bring a light."';
     if (obj.plane >= 2) return 'Scratched into the wall: "Deeper still. Bring a friend as well as a light."';
-    if (obj.x < 40) return 'Signpost: "Copper Hollow - mind the golems. Ore this way."';
+    if (obj.x >= 25 && obj.x < 32) return 'Signpost: "Copper Hollow. Ore ahead - and the old shaft, straight on past the braziers. Take a light."';
+    if (obj.x < 40) return 'Signpost: "Copper Hollow - mind the golems. Ore this way, mine shaft west."';
     if (obj.x > 58) return 'Signpost: "Lake Serene - fishing, swimming, and quiet."';
-    return 'Signpost: "Emberfall Village. Bank north-west, store north-east, smithy south-west, kitchen south-east."';
+    return 'Signpost: "Emberfall Village. Bank north-west, store north-east, smithy south-west, kitchen south-east. Copper Hollow and the mine shaft: west along the road."';
   }
 
   beginGathering(player, obj, action) {

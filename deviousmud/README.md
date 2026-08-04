@@ -68,8 +68,12 @@ your items and experience intact.
 
 ### Going down
 
-Finish **The Deep Seam** for Miner Mira and the old shaft in Copper Hollow opens.
-Below it are three levels, each darker and harder than the one above:
+Walk **west along the road** into Copper Hollow. Three tiles inside the quarry
+there is a timbered shaft with a lamp on the lintel and a brazier burning either
+side of it — click it and you go down. You do not need a quest to do this; the
+four mine quests are a guided route, not a lock.
+
+Below are three levels, each darker and harder than the one above:
 
 | Level | What is down there |
 | --- | --- |

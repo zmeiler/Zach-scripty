@@ -39,7 +39,7 @@ Hollow.
 | --- | --- | --- | --- |
 | Emberfall Village | 0 | centre | Bank, general store, smithy (furnace + anvil), kitchen (range), fountain, eight townsfolk |
 | Whispering Woods | 0 | north | Trees, oaks, willows, forest wolves, goblin scamps |
-| Copper Hollow | 0 | west | Copper, tin, iron and coal rocks; cave imps; rock golems; the mine mouth |
+| Copper Hollow | 0 | west | Copper, tin, iron and coal rocks; cave imps; rock golems; the mine mouth, three tiles inside the quarry on the road line |
 | Lake Serene | 0 | east | Shrimp, trout and salmon fishing spots, sandy shore, willows |
 | Sunny Meadow | 0 | south | Flowers, giant rats, meadow boars, goblin scamps |
 | Copper Hollow Mine | 1 | below | Eight galleries; copper through coal; bats, crawlers, dust sprites; Foreman Dorn |
@@ -65,6 +65,25 @@ was carved. Everything else stays `VOID`, drawn as nothing at all, so a level
 reads as an island of worked stone rather than a rectangle with a border. The
 floor plan is exported as `MINE_ROOMS`, so creature spawns and quest steps name
 a gallery instead of repeating coordinates.
+
+### Finding the way down
+
+Discoverability is a design requirement, not a polish item: a dungeon a player
+cannot find is not a dungeon. Four things carry it, and each is asserted by a
+test rather than left to good intentions.
+
+* **Placement.** The mouth sits on the road line, three tiles inside the quarry —
+  straight ahead as you arrive. The first version was twenty tiles further west,
+  where it read as one more rock among forty.
+* **Contrast.** Heavy timbers, a lamp burning on the lintel, a glow from the
+  shaft, and a brazier either side. A moving flame is the one thing on a screen
+  of grey rock that the eye reliably finds.
+* **The map.** The minimap draws a loud marker for any object carrying a `link`,
+  on every plane — orange for down, blue for up — in a colour nothing else on
+  the map uses. Underground this is the difference between a level and a maze.
+* **Being told.** Tutor Pip and Miner Mira both mention the shaft to a brand new
+  character who has done nothing, and the signposts name it. The quest chain is a
+  guided route, not a lock: anyone can climb down at any level.
 
 ### Darkness and light
 

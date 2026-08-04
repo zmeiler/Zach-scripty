@@ -553,29 +553,66 @@ function drawIsoLadder(ctx, w, h, direction) {
 const PROPS = {
   ladder_down: (ctx, w, h) => drawIsoLadder(ctx, w, h, 'down'),
   ladder_up: (ctx, w, h) => drawIsoLadder(ctx, w, h, 'up'),
+  /**
+   * The mine mouth. Drawn deliberately loud: an entrance that reads as one more
+   * rock is an entrance nobody finds, which is exactly what happened to the
+   * first version of this sprite.
+   */
   mine_entrance: (ctx, w, h) => {
     const baseY = h - ISO_TILE_H / 2;
-    propShadow(ctx, w, h, 0.6);
-    // Dark mouth.
-    ctx.fillStyle = '#100c0a';
-    ctx.beginPath();
-    ctx.moveTo(w * 0.24, baseY);
-    ctx.lineTo(w * 0.24, baseY - 34);
-    ctx.quadraticCurveTo(w * 0.5, baseY - 62, w * 0.76, baseY - 34);
-    ctx.lineTo(w * 0.76, baseY);
-    ctx.closePath();
-    ctx.fill();
-    // Timber frame.
-    ctx.fillStyle = shade('#7a5a32', FACE.left);
-    ctx.fillRect(w * 0.18, baseY - 44, 7, 46);
-    ctx.fillStyle = shade('#7a5a32', FACE.right);
-    ctx.fillRect(w * 0.75, baseY - 44, 7, 46);
-    ctx.fillStyle = shade('#8a6a3c', FACE.top);
-    ctx.fillRect(w * 0.16, baseY - 52, w * 0.66, 9);
-    // Spoil heap either side, so it sits in the ground rather than on it.
+    propShadow(ctx, w, h, 0.7);
+
+    // Spoil heap first, so the mouth sits in the ground rather than on it.
     ctx.fillStyle = shade('#5b5349', FACE.left);
     ctx.beginPath();
-    ctx.ellipse(w * 0.5, baseY + 2, ISO_TILE_W * 0.42, ISO_TILE_H * 0.36, 0, 0, Math.PI * 2);
+    ctx.ellipse(w * 0.5, baseY + 3, ISO_TILE_W * 0.46, ISO_TILE_H * 0.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Dark mouth, with something warm a long way down it.
+    ctx.fillStyle = '#0a0705';
+    ctx.beginPath();
+    ctx.moveTo(w * 0.2, baseY + 2);
+    ctx.lineTo(w * 0.2, baseY - 40);
+    ctx.quadraticCurveTo(w * 0.5, baseY - 72, w * 0.8, baseY - 40);
+    ctx.lineTo(w * 0.8, baseY + 2);
+    ctx.closePath();
+    ctx.fill();
+    const glow = ctx.createRadialGradient(w * 0.5, baseY - 14, 1, w * 0.5, baseY - 14, 22);
+    glow.addColorStop(0, 'rgba(255,150,60,0.5)');
+    glow.addColorStop(1, 'rgba(255,150,60,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.ellipse(w * 0.5, baseY - 12, 20, 16, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Heavy timber frame.
+    ctx.fillStyle = shade('#7a5a32', FACE.left);
+    ctx.fillRect(w * 0.14, baseY - 52, 9, 56);
+    ctx.fillStyle = shade('#7a5a32', FACE.right);
+    ctx.fillRect(w * 0.78, baseY - 52, 9, 56);
+    ctx.fillStyle = shade('#8a6a3c', FACE.top);
+    ctx.fillRect(w * 0.12, baseY - 62, w * 0.76, 11);
+    ctx.fillStyle = shade('#6b4e2b', FACE.right);
+    ctx.fillRect(w * 0.12, baseY - 51, w * 0.76, 3);
+
+    // A lamp hung on the lintel: a small bright point at eye level, which is
+    // what actually catches the eye across a screen full of grey rock.
+    ctx.strokeStyle = '#4a4038';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.5, baseY - 62);
+    ctx.lineTo(w * 0.5, baseY - 54);
+    ctx.stroke();
+    ctx.fillStyle = '#3b332c';
+    ctx.fillRect(w * 0.5 - 5, baseY - 54, 10, 11);
+    ctx.fillStyle = '#ffd166';
+    ctx.fillRect(w * 0.5 - 3, baseY - 52, 6, 7);
+    const lamp = ctx.createRadialGradient(w * 0.5, baseY - 48, 1, w * 0.5, baseY - 48, 16);
+    lamp.addColorStop(0, 'rgba(255,209,102,0.55)');
+    lamp.addColorStop(1, 'rgba(255,209,102,0)');
+    ctx.fillStyle = lamp;
+    ctx.beginPath();
+    ctx.arc(w * 0.5, baseY - 48, 16, 0, Math.PI * 2);
     ctx.fill();
   },
   brazier: (ctx, w, h) => {
@@ -815,7 +852,7 @@ const PROPS = {
 
 /** Height in pixels above the tile footprint for each prop. */
 const PROP_HEIGHTS = {
-  ladder_down: 44, ladder_up: 76, mine_entrance: 72, mine_cart: 40, brazier: 64,
+  ladder_down: 44, ladder_up: 76, mine_entrance: 86, mine_cart: 40, brazier: 64,
   tree: 110, oak: 116, willow: 104, stump: 34,
   rock_copper: 56, rock_tin: 56, rock_iron: 56, rock_coal: 56, rock_spent: 56,
   rock_mithril: 58, rock_adamant: 60,

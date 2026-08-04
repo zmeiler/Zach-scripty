@@ -1276,9 +1276,11 @@ function buildWorld(seed = WORLD_SEED) {
     const y = 34 + Math.floor(rng() * 30);
     if (rng() < 0.35) tiles[idx(x, y)] = TILE.GRAVEL;
   }
-  // Quarry mouth on the east wall, aligned with the main road.
+  // Quarry mouth on the east wall, aligned with the main road, and a worked
+  // path running from it to the shaft so there is a line to follow.
   fillRect(tiles, 29, 50, 2, 3, TILE.GRAVEL);
   tiles[idx(29, 51)] = TILE.GRAVEL;
+  fillRect(tiles, 22, 50, 9, 3, TILE.GRAVEL);
 
   // --- Roads ---------------------------------------------------------------
   road(tiles, 28, 51, 66, 51, 3);          // west quarry -> village -> lake
@@ -1359,9 +1361,15 @@ function nearRoad(x, y) {
 function placeObjects(world, rng) {
   const { tiles } = world;
 
-  // The mine mouth is claimed before the ore scatter, so a randomly placed rock
-  // can never sit on the one tile that has to stay clear.
-  world.mineEntrance = addObject(world, 'mine_entrance', 10, 50);
+  // The mine mouth sits three tiles inside the quarry, straight ahead on the
+  // road you arrive by - the first version was twenty tiles further west, where
+  // it read as one more rock among forty. It is claimed before the ore scatter
+  // so a randomly placed rock can never take its tile, and flanked by braziers
+  // because a moving flame is the one thing on this screen the eye goes to.
+  world.mineEntrance = addObject(world, 'mine_entrance', 24, 51);
+  addObject(world, 'brazier', 24, 49);
+  addObject(world, 'brazier', 24, 53);
+  addObject(world, 'signpost', 27, 52);
 
   // Whispering Woods: ordinary trees everywhere, oaks in clusters, willows by
   // the northern lake shore.
@@ -3352,9 +3360,10 @@ class Game {
     if (obj.type === 'mine_cart') return 'The cart holds nothing but grit and one very old glove.';
     if (obj.plane === 1) return 'Chalked on the rock: "Copper and tin above, iron and coal below. Bring a light."';
     if (obj.plane >= 2) return 'Scratched into the wall: "Deeper still. Bring a friend as well as a light."';
-    if (obj.x < 40) return 'Signpost: "Copper Hollow - mind the golems. Ore this way."';
+    if (obj.x >= 25 && obj.x < 32) return 'Signpost: "Copper Hollow. Ore ahead - and the old shaft, straight on past the braziers. Take a light."';
+    if (obj.x < 40) return 'Signpost: "Copper Hollow - mind the golems. Ore this way, mine shaft west."';
     if (obj.x > 58) return 'Signpost: "Lake Serene - fishing, swimming, and quiet."';
-    return 'Signpost: "Emberfall Village. Bank north-west, store north-east, smithy south-west, kitchen south-east."';
+    return 'Signpost: "Emberfall Village. Bank north-west, store north-east, smithy south-west, kitchen south-east. Copper Hollow and the mine shaft: west along the road."';
   }
 
   beginGathering(player, obj, action) {
@@ -6335,6 +6344,7 @@ const DIALOGUE = Object.freeze({
           { text: 'How do I move and fight?', next: 'controls' },
           { text: 'How do skills work?', next: 'skills' },
           { text: 'What can I do around here?', next: 'activities' },
+          { text: 'Is there anywhere I should not go?', next: 'mine' },
           { text: 'Can you top me up?', next: 'heal' },
           { text: 'Nothing, thanks.', next: null }
         ]
@@ -6352,6 +6362,19 @@ const DIALOGUE = Object.freeze({
       activities: {
         speaker: 'npc',
         text: 'Trees north, rocks west, fish east, creatures south. Bea sells tools, Cyrus minds your bank, and the smithy behind me turns ore into swords.',
+        options: [{ text: 'Anything else?', next: 'greet' }]
+      },
+      mine: {
+        speaker: 'npc',
+        text: 'West, in Copper Hollow, there is a shaft going down under the quarry. Two braziers burning either side of it - you cannot miss them. It goes down a long way, and it is very dark.',
+        options: [
+          { text: 'Can I go down it?', next: 'mine_yes' },
+          { text: 'Anything else?', next: 'greet' }
+        ]
+      },
+      mine_yes: {
+        speaker: 'npc',
+        text: 'Anyone can. Buy a torch from Bea first - a few coins, and worth every one. Mira knows more about what is down there than I do.',
         options: [{ text: 'Anything else?', next: 'greet' }]
       },
       heal: {
@@ -6478,8 +6501,14 @@ const DIALOGUE = Object.freeze({
         text: 'Copper and tin near the mouth, iron in the middle, coal at the back. Smelt one copper with one tin and you have bronze.',
         options: [
           { text: 'How do I smelt?', next: 'smelt' },
+          { text: 'What is that shaft with the braziers?', next: 'shaft' },
           { text: 'Thanks.', next: null }
         ]
+      },
+      shaft: {
+        speaker: 'npc',
+        text: 'The old mine. Three levels that I know of, and warmer every one. Go down if you like - take a light, and do not be proud about coming back up.',
+        options: [{ text: 'Thanks.', next: null }]
       },
       smelt: {
         speaker: 'npc',
@@ -7643,6 +7672,20 @@ class Minimap {
       if (def.art === 'tree' || def.art === 'oak' || def.art === 'willow') {
         ctx.fillRect(obj.x * this.scale, obj.y * this.scale, this.scale, this.scale);
       }
+    }
+
+    // Ways between levels, marked loudly. A player who cannot find the stairs
+    // has no dungeon, however much of one you built - so these are drawn last,
+    // larger than a tile, and in the one colour nothing else on the map uses.
+    for (const obj of level.objects) {
+      if (!obj.link) continue;
+      const size = this.scale * 3;
+      const x = obj.x * this.scale - this.scale;
+      const y = obj.y * this.scale - this.scale;
+      ctx.fillStyle = '#0c1116';
+      ctx.fillRect(x - 1, y - 1, size + 2, size + 2);
+      ctx.fillStyle = obj.link.plane > obj.plane ? '#ff8a3d' : '#7fd4ff';
+      ctx.fillRect(x, y, size, size);
     }
     return off;
   }
@@ -9328,29 +9371,66 @@ function drawIsoLadder(ctx, w, h, direction) {
 const PROPS = {
   ladder_down: (ctx, w, h) => drawIsoLadder(ctx, w, h, 'down'),
   ladder_up: (ctx, w, h) => drawIsoLadder(ctx, w, h, 'up'),
+  /**
+   * The mine mouth. Drawn deliberately loud: an entrance that reads as one more
+   * rock is an entrance nobody finds, which is exactly what happened to the
+   * first version of this sprite.
+   */
   mine_entrance: (ctx, w, h) => {
     const baseY = h - ISO_TILE_H / 2;
-    propShadow(ctx, w, h, 0.6);
-    // Dark mouth.
-    ctx.fillStyle = '#100c0a';
-    ctx.beginPath();
-    ctx.moveTo(w * 0.24, baseY);
-    ctx.lineTo(w * 0.24, baseY - 34);
-    ctx.quadraticCurveTo(w * 0.5, baseY - 62, w * 0.76, baseY - 34);
-    ctx.lineTo(w * 0.76, baseY);
-    ctx.closePath();
-    ctx.fill();
-    // Timber frame.
-    ctx.fillStyle = shade('#7a5a32', FACE.left);
-    ctx.fillRect(w * 0.18, baseY - 44, 7, 46);
-    ctx.fillStyle = shade('#7a5a32', FACE.right);
-    ctx.fillRect(w * 0.75, baseY - 44, 7, 46);
-    ctx.fillStyle = shade('#8a6a3c', FACE.top);
-    ctx.fillRect(w * 0.16, baseY - 52, w * 0.66, 9);
-    // Spoil heap either side, so it sits in the ground rather than on it.
+    propShadow(ctx, w, h, 0.7);
+
+    // Spoil heap first, so the mouth sits in the ground rather than on it.
     ctx.fillStyle = shade('#5b5349', FACE.left);
     ctx.beginPath();
-    ctx.ellipse(w * 0.5, baseY + 2, ISO_TILE_W * 0.42, ISO_TILE_H * 0.36, 0, 0, Math.PI * 2);
+    ctx.ellipse(w * 0.5, baseY + 3, ISO_TILE_W * 0.46, ISO_TILE_H * 0.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Dark mouth, with something warm a long way down it.
+    ctx.fillStyle = '#0a0705';
+    ctx.beginPath();
+    ctx.moveTo(w * 0.2, baseY + 2);
+    ctx.lineTo(w * 0.2, baseY - 40);
+    ctx.quadraticCurveTo(w * 0.5, baseY - 72, w * 0.8, baseY - 40);
+    ctx.lineTo(w * 0.8, baseY + 2);
+    ctx.closePath();
+    ctx.fill();
+    const glow = ctx.createRadialGradient(w * 0.5, baseY - 14, 1, w * 0.5, baseY - 14, 22);
+    glow.addColorStop(0, 'rgba(255,150,60,0.5)');
+    glow.addColorStop(1, 'rgba(255,150,60,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.ellipse(w * 0.5, baseY - 12, 20, 16, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Heavy timber frame.
+    ctx.fillStyle = shade('#7a5a32', FACE.left);
+    ctx.fillRect(w * 0.14, baseY - 52, 9, 56);
+    ctx.fillStyle = shade('#7a5a32', FACE.right);
+    ctx.fillRect(w * 0.78, baseY - 52, 9, 56);
+    ctx.fillStyle = shade('#8a6a3c', FACE.top);
+    ctx.fillRect(w * 0.12, baseY - 62, w * 0.76, 11);
+    ctx.fillStyle = shade('#6b4e2b', FACE.right);
+    ctx.fillRect(w * 0.12, baseY - 51, w * 0.76, 3);
+
+    // A lamp hung on the lintel: a small bright point at eye level, which is
+    // what actually catches the eye across a screen full of grey rock.
+    ctx.strokeStyle = '#4a4038';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.5, baseY - 62);
+    ctx.lineTo(w * 0.5, baseY - 54);
+    ctx.stroke();
+    ctx.fillStyle = '#3b332c';
+    ctx.fillRect(w * 0.5 - 5, baseY - 54, 10, 11);
+    ctx.fillStyle = '#ffd166';
+    ctx.fillRect(w * 0.5 - 3, baseY - 52, 6, 7);
+    const lamp = ctx.createRadialGradient(w * 0.5, baseY - 48, 1, w * 0.5, baseY - 48, 16);
+    lamp.addColorStop(0, 'rgba(255,209,102,0.55)');
+    lamp.addColorStop(1, 'rgba(255,209,102,0)');
+    ctx.fillStyle = lamp;
+    ctx.beginPath();
+    ctx.arc(w * 0.5, baseY - 48, 16, 0, Math.PI * 2);
     ctx.fill();
   },
   brazier: (ctx, w, h) => {
@@ -9590,7 +9670,7 @@ const PROPS = {
 
 /** Height in pixels above the tile footprint for each prop. */
 const PROP_HEIGHTS = {
-  ladder_down: 44, ladder_up: 76, mine_entrance: 72, mine_cart: 40, brazier: 64,
+  ladder_down: 44, ladder_up: 76, mine_entrance: 86, mine_cart: 40, brazier: 64,
   tree: 110, oak: 116, willow: 104, stump: 34,
   rock_copper: 56, rock_tin: 56, rock_iron: 56, rock_coal: 56, rock_spent: 56,
   rock_mithril: 58, rock_adamant: 60,
