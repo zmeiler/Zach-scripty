@@ -1,19 +1,35 @@
 /**
  * Canvas world renderer.
  *
- * The simulation runs at 600ms per tick; the renderer runs at whatever the
- * display can manage and smooths every position towards its server value, so
- * movement looks continuous without the client ever guessing where an entity
- * will be.
+ * Draws the tile grid in one of two projections — isometric (the default) or
+ * straight top-down — from the same simulation state. The engine only ever
+ * deals in tile coordinates, so the projection is purely a view concern:
+ * `project` / `unproject` and the art set are the only things that differ.
+ *
+ * The simulation runs at 600ms per tick; the renderer runs as fast as the
+ * display allows and eases every entity towards its last server position, so
+ * movement looks continuous without the client ever predicting the future.
  */
 
-import { TILE_SIZE, TILE } from '../../shared/constants.js';
+import { TILE_SIZE, TILE, BLOCKED_TILES } from '../../shared/constants.js';
 import { OBJECT_TYPES } from '../../shared/world.js';
 import { state } from './state.js';
 import { itemSprite, noise2, npcSprite, objectSprite, playerSprite, tileSprite } from './sprites.js';
+import { ISO_TILE_H, ISO_TILE_W, isoProject, isoUnproject } from './iso.js';
+import { isoCubeSprite, isoFloorSprite, isoNpcSprite, isoPlayerSprite, isoPropSprite, ISO_CHAR_H, ISO_CHAR_W } from './isoSprites.js';
 
 const SPLAT_LIFETIME = 1200;
-const BUBBLE_LIFETIME = 4800;
+
+/** Maps a facing to the pair (sprite view, mirrored) used by the iso art. */
+function isoFacing(dir) {
+  switch (dir) {
+    case 'east': return { view: 'front', flip: false };
+    case 'south': return { view: 'front', flip: true };
+    case 'north': return { view: 'back', flip: false };
+    case 'west': return { view: 'back', flip: true };
+    default: return { view: 'front', flip: true };
+  }
+}
 
 export class Renderer {
   constructor(canvas, world) {
@@ -25,15 +41,31 @@ export class Renderer {
     this.hoverTile = null;
     this.lastFrame = performance.now();
     this.dpr = Math.min(window.devicePixelRatio || 1, 2);
-    this.bubbles = new Map();
+    this.drawables = [];
     this.resize();
   }
 
+  get isometric() {
+    return (state.settings.projection || 'iso') === 'iso';
+  }
+
+  /** Zoom, with a nudge upwards on small screens so touch targets stay usable. */
+  get scale() {
+    const zoom = state.settings.zoom || 1;
+    return zoom * (this.cssWidth < 620 ? 1.12 : 1);
+  }
+
+  /** Square-tile size, used by the top-down projection and the UI. */
   get tileSize() {
-    const base = TILE_SIZE * (state.settings.zoom || 1);
-    // Phones get a slightly larger tile so touch targets stay comfortable.
-    const scale = this.cssWidth < 620 ? 1.15 : 1;
-    return Math.round(base * scale);
+    return Math.round(TILE_SIZE * this.scale);
+  }
+
+  get halfW() {
+    return (ISO_TILE_W / 2) * this.scale;
+  }
+
+  get halfH() {
+    return (ISO_TILE_H / 2) * this.scale;
   }
 
   resize() {
@@ -47,74 +79,80 @@ export class Renderer {
     this.ctx.imageSmoothingEnabled = false;
   }
 
-  /** Screen pixel -> world tile. */
-  screenToTile(px, py) {
+  // ------------------------------------------------------------ projection
+
+  /** Tile coordinate -> centre of that tile on screen. */
+  project(tx, ty) {
+    if (this.isometric) {
+      const p = isoProject(tx - this.camX, ty - this.camY, this.halfW, this.halfH);
+      return { x: this.cssWidth / 2 + p.x, y: this.cssHeight / 2 + p.y };
+    }
     const size = this.tileSize;
-    const originX = this.cssWidth / 2 - this.camX * size - size / 2;
-    const originY = this.cssHeight / 2 - this.camY * size - size / 2;
     return {
-      x: Math.floor((px - originX) / size),
-      y: Math.floor((py - originY) / size)
+      x: this.cssWidth / 2 + (tx - this.camX) * size,
+      y: this.cssHeight / 2 + (ty - this.camY) * size
     };
   }
 
+  /** Screen pixel -> tile coordinate (floored). */
+  unproject(px, py) {
+    if (this.isometric) {
+      const t = isoUnproject(px - this.cssWidth / 2, py - this.cssHeight / 2, this.halfW, this.halfH);
+      return { x: Math.floor(t.x + this.camX + 0.5), y: Math.floor(t.y + this.camY + 0.5) };
+    }
+    const size = this.tileSize;
+    return {
+      x: Math.floor((px - this.cssWidth / 2) / size + this.camX + 0.5),
+      y: Math.floor((py - this.cssHeight / 2) / size + this.camY + 0.5)
+    };
+  }
+
+  /** Kept for callers that want the top-left of a tile's bounding box. */
   tileToScreen(tx, ty) {
-    const size = this.tileSize;
-    return {
-      x: this.cssWidth / 2 + (tx - this.camX) * size - size / 2,
-      y: this.cssHeight / 2 + (ty - this.camY) * size - size / 2
-    };
+    const c = this.project(tx, ty);
+    return this.isometric
+      ? { x: c.x - this.halfW, y: c.y - this.halfH }
+      : { x: c.x - this.tileSize / 2, y: c.y - this.tileSize / 2 };
   }
 
-  /** What did the player click on? Entities beat objects, objects beat ground. */
-  pick(px, py) {
-    const tile = this.screenToTile(px, py);
-    const size = this.tileSize;
-
-    let best = null;
-    let bestScore = -Infinity;
-    const consider = (candidate, ex, ey, priority) => {
-      const screen = this.tileToScreen(ex, ey);
-      const withinX = px >= screen.x - size * 0.2 && px <= screen.x + size * 1.2;
-      const withinY = py >= screen.y - size * 0.8 && py <= screen.y + size * 1.1;
-      if (!withinX || !withinY) return;
-      const score = priority + ey * 0.001;
-      if (score > bestScore) {
-        bestScore = score;
-        best = candidate;
-      }
-    };
-
-    for (const npc of state.npcs.values()) {
-      consider({ kind: 'npc', id: npc.id, entity: npc }, npc.renderX ?? npc.x, npc.renderY ?? npc.y, 30);
-    }
-    for (const player of state.players.values()) {
-      if (player.id === state.playerId) continue;
-      consider({ kind: 'player', id: player.id, entity: player }, player.renderX ?? player.x, player.renderY ?? player.y, 25);
-    }
-    for (const item of state.groundItems.values()) {
-      consider({ kind: 'ground_item', id: item.id, entity: item }, item.x, item.y, 20);
-    }
-    for (const obj of state.dynamicObjects.values()) {
-      consider({ kind: 'object', id: obj.id, entity: obj, objectType: obj.type }, obj.x, obj.y, 15);
-    }
-    const worldObject = this.world.objectAt.get(`${tile.x},${tile.y}`);
-    if (worldObject) {
-      consider({ kind: 'object', id: worldObject.id, entity: worldObject, objectType: worldObject.type }, worldObject.x, worldObject.y, 10);
-    }
-    // Trees are two tiles tall: also check the tile below the click.
-    const below = this.world.objectAt.get(`${tile.x},${tile.y + 1}`);
-    if (below && OBJECT_TYPES[below.type]?.height === 2) {
-      consider({ kind: 'object', id: below.id, entity: below, objectType: below.type }, below.x, below.y, 9);
-    }
-
-    if (best) return best;
-    return { kind: 'tile', x: tile.x, y: tile.y };
+  screenToTile(px, py) {
+    return this.unproject(px, py);
   }
 
   setHover(px, py) {
-    this.hoverTile = this.screenToTile(px, py);
+    this.hoverTile = this.unproject(px, py);
   }
+
+  /** Tiles that can appear on screen, with a margin for tall props. */
+  visibleBounds() {
+    if (!this.isometric) {
+      const size = this.tileSize;
+      const halfCols = Math.ceil(this.cssWidth / size / 2) + 2;
+      const halfRows = Math.ceil(this.cssHeight / size / 2) + 3;
+      return {
+        minX: Math.max(0, Math.floor(this.camX) - halfCols),
+        maxX: Math.min(this.world.width - 1, Math.ceil(this.camX) + halfCols),
+        minY: Math.max(0, Math.floor(this.camY) - halfRows),
+        maxY: Math.min(this.world.height - 1, Math.ceil(this.camY) + halfRows)
+      };
+    }
+    // Unproject the four screen corners; the diamond they span is the view.
+    const margin = 140;
+    const corners = [
+      this.unproject(-margin, -margin),
+      this.unproject(this.cssWidth + margin, -margin),
+      this.unproject(-margin, this.cssHeight + margin),
+      this.unproject(this.cssWidth + margin, this.cssHeight + margin)
+    ];
+    return {
+      minX: Math.max(0, Math.min(...corners.map((c) => c.x)) - 1),
+      maxX: Math.min(this.world.width - 1, Math.max(...corners.map((c) => c.x)) + 1),
+      minY: Math.max(0, Math.min(...corners.map((c) => c.y)) - 1),
+      maxY: Math.min(this.world.height - 1, Math.max(...corners.map((c) => c.y)) + 1)
+    };
+  }
+
+  // ---------------------------------------------------------------- frame
 
   smooth(entity, dt) {
     const speed = Math.min(1, dt / 110);
@@ -123,7 +161,6 @@ export class Renderer {
       entity.renderY = entity.y;
       return;
     }
-    // Snap when teleported (respawn) rather than sliding across the map.
     if (Math.abs(entity.renderX - entity.x) > 6 || Math.abs(entity.renderY - entity.y) > 6) {
       entity.renderX = entity.x;
       entity.renderY = entity.y;
@@ -137,43 +174,112 @@ export class Renderer {
     const dt = Math.min(64, now - this.lastFrame);
     this.lastFrame = now;
     const ctx = this.ctx;
-    const size = this.tileSize;
 
-    // Camera follows the player with a gentle lag.
     const camSpeed = Math.min(1, dt / 130);
     this.camX += (state.self.x - this.camX) * camSpeed;
     this.camY += (state.self.y - this.camY) * camSpeed;
 
-    ctx.fillStyle = '#0c1116';
+    ctx.fillStyle = this.isometric ? '#0a0f14' : '#0c1116';
     ctx.fillRect(0, 0, this.cssWidth, this.cssHeight);
 
-    const originX = this.cssWidth / 2 - this.camX * size - size / 2;
-    const originY = this.cssHeight / 2 - this.camY * size - size / 2;
-    const minX = Math.max(0, Math.floor(-originX / size) - 1);
-    const minY = Math.max(0, Math.floor(-originY / size) - 1);
-    const maxX = Math.min(this.world.width - 1, Math.ceil((this.cssWidth - originX) / size));
-    const maxY = Math.min(this.world.height - 1, Math.ceil((this.cssHeight - originY) / size));
+    const bounds = this.visibleBounds();
+    this.drawFloors(bounds, now);
 
-    // ---- terrain
-    for (let ty = minY; ty <= maxY; ty += 1) {
-      for (let tx = minX; tx <= maxX; tx += 1) {
+    // Everything with height, sorted back to front.
+    const drawables = [];
+    this.collectProps(bounds, drawables, now);
+    this.collectEntities(drawables, dt, now);
+    drawables.sort((a, b) => a.depth - b.depth || a.tie - b.tie);
+
+    const selfDepth = this.isometric ? state.self.x + state.self.y : state.self.y;
+    const selfPoint = this.project(state.self.x, state.self.y);
+
+    for (const item of drawables) {
+      // Fade tall things standing between the camera and the player.
+      const hides =
+        item.tall &&
+        item.depth > selfDepth &&
+        selfPoint.x > item.bounds.x - 4 &&
+        selfPoint.x < item.bounds.x + item.bounds.w + 4 &&
+        selfPoint.y > item.bounds.y &&
+        selfPoint.y < item.bounds.y + item.bounds.h + 8;
+      if (hides) ctx.globalAlpha = 0.42;
+      item.draw();
+      ctx.globalAlpha = 1;
+    }
+
+    this.drawables = drawables;
+    this.drawHover();
+    this.drawOverlays(drawables, now);
+    this.drawSplats(now);
+    this.drawVignette();
+  }
+
+  drawFloors(bounds, now) {
+    const ctx = this.ctx;
+    const iso = this.isometric;
+    const w = iso ? this.halfW * 2 : this.tileSize;
+    const h = iso ? this.halfH * 2 : this.tileSize;
+
+    for (let ty = bounds.minY; ty <= bounds.maxY; ty += 1) {
+      for (let tx = bounds.minX; tx <= bounds.maxX; tx += 1) {
         const tile = this.world.tiles[ty * this.world.width + tx];
+        // Walls and cliffs are solids, drawn later as cubes.
+        if (iso && BLOCKED_TILES.has(tile) && tile !== TILE.WATER) continue;
         const variant = Math.floor(noise2(tx, ty, tile) * 4);
-        const sprite = tileSprite(tile, variant, 32);
-        ctx.drawImage(sprite, Math.round(originX + tx * size), Math.round(originY + ty * size), size, size);
+        const sprite = iso ? isoFloorSprite(tile, variant) : tileSprite(tile, variant, 32);
+        const p = this.project(tx, ty);
+        ctx.drawImage(sprite, Math.round(p.x - w / 2), Math.round(p.y - h / 2), Math.ceil(w), Math.ceil(h));
+
         if (tile === TILE.WATER) {
-          const shimmer = 0.08 + 0.05 * Math.sin(now / 700 + tx * 0.6 + ty * 0.4);
-          ctx.fillStyle = `rgba(255,255,255,${shimmer.toFixed(3)})`;
-          ctx.fillRect(Math.round(originX + tx * size), Math.round(originY + ty * size), size, size);
+          const shimmer = 0.06 + 0.05 * Math.sin(now / 700 + tx * 0.6 + ty * 0.4);
+          ctx.globalAlpha = shimmer;
+          ctx.fillStyle = '#dff2ff';
+          if (iso) {
+            ctx.beginPath();
+            ctx.moveTo(p.x, p.y - h / 2);
+            ctx.lineTo(p.x + w / 2, p.y);
+            ctx.lineTo(p.x, p.y + h / 2);
+            ctx.lineTo(p.x - w / 2, p.y);
+            ctx.closePath();
+            ctx.fill();
+          } else {
+            ctx.fillRect(Math.round(p.x - w / 2), Math.round(p.y - h / 2), w, h);
+          }
+          ctx.globalAlpha = 1;
         }
       }
     }
+  }
 
-    // ---- everything that needs y-sorting
-    const drawables = [];
+  collectProps(bounds, drawables, now) {
+    const ctx = this.ctx;
+    const iso = this.isometric;
 
-    for (let ty = minY - 1; ty <= maxY + 1; ty += 1) {
-      for (let tx = minX; tx <= maxX; tx += 1) {
+    for (let ty = bounds.minY; ty <= bounds.maxY; ty += 1) {
+      for (let tx = bounds.minX; tx <= bounds.maxX; tx += 1) {
+        const depth = iso ? tx + ty : ty;
+
+        // Solid terrain becomes a cube in the isometric view.
+        const tile = this.world.tiles[ty * this.world.width + tx];
+        if (iso && BLOCKED_TILES.has(tile) && tile !== TILE.WATER) {
+          const sprite = isoCubeSprite(tile === TILE.ROCKFACE ? 'rockface' : 'wall');
+          const p = this.project(tx, ty);
+          const w = sprite.width * this.scale;
+          const h = sprite.height * this.scale;
+          const x = Math.round(p.x - w / 2);
+          const y = Math.round(p.y + this.halfH - h);
+          drawables.push({
+            depth,
+            tie: 0,
+            tall: true,
+            bounds: { x, y, w, h },
+            sprite,
+            draw: () => ctx.drawImage(sprite, x, y, Math.ceil(w), Math.ceil(h))
+          });
+          continue;
+        }
+
         const obj = this.world.objectAt.get(`${tx},${ty}`);
         if (!obj || obj.dynamic) continue;
         const def = OBJECT_TYPES[obj.type];
@@ -185,120 +291,203 @@ export class Renderer {
           else if (art.startsWith('rock_')) art = 'rock_spent';
           else continue;
         }
-        drawables.push({ sort: ty, draw: () => this.drawProp(art, tx, ty, originX, originY, size, def) });
+        drawables.push(this.propDrawable(art, tx, ty, def, { kind: 'object', id: obj.id, entity: obj, objectType: obj.type }));
       }
     }
 
     for (const obj of state.dynamicObjects.values()) {
       const def = OBJECT_TYPES[obj.type];
       if (!def) continue;
-      drawables.push({ sort: obj.y, draw: () => this.drawProp(def.art, obj.x, obj.y, originX, originY, size, def) });
+      drawables.push(this.propDrawable(def.art, obj.x, obj.y, def, { kind: 'object', id: obj.id, entity: obj, objectType: obj.type }));
     }
 
     for (const item of state.groundItems.values()) {
+      const p = this.project(item.x, item.y);
+      const size = (this.isometric ? this.halfW : this.tileSize / 2) * 0.9;
+      const sprite = itemSprite(item.itemId, 32);
+      const x = Math.round(p.x - size / 2);
+      const y = Math.round(p.y - size / 2 + (this.isometric ? this.halfH * 0.2 : 0));
       drawables.push({
-        sort: item.y - 0.4,
+        depth: (this.isometric ? item.x + item.y : item.y) - 0.05,
+        tie: 1,
+        tall: false,
+        bounds: { x, y, w: size, h: size },
+        sprite,
+        pick: { kind: 'ground_item', id: item.id, entity: item },
         draw: () => {
-          const sprite = itemSprite(item.itemId, 32);
-          ctx.drawImage(sprite, Math.round(originX + item.x * size + size * 0.2), Math.round(originY + item.y * size + size * 0.3), size * 0.6, size * 0.6);
+          ctx.globalAlpha = 0.85 + 0.15 * Math.sin(now / 400);
+          ctx.drawImage(sprite, x, y, size, size);
+          ctx.globalAlpha = 1;
         }
       });
     }
+  }
 
+  propDrawable(art, tx, ty, def, pick) {
+    const ctx = this.ctx;
+    const p = this.project(tx, ty);
+    const iso = this.isometric;
+    const sprite = iso ? isoPropSprite(art) : objectSprite(art, 32);
+    const w = iso ? sprite.width * this.scale : this.tileSize;
+    const tall = iso ? sprite.height > ISO_TILE_H * 2 : def.height === 2;
+    const h = iso ? sprite.height * this.scale : (def.height === 2 ? this.tileSize * 2 : this.tileSize);
+    const x = Math.round(p.x - w / 2);
+    const y = iso ? Math.round(p.y + this.halfH - h) : Math.round(p.y - this.tileSize / 2 - (def.height === 2 ? this.tileSize : 0));
+
+    return {
+      depth: iso ? tx + ty : ty,
+      tie: 2,
+      tall,
+      bounds: { x, y, w, h },
+      sprite,
+      pick,
+      draw: () => ctx.drawImage(sprite, x, y, Math.ceil(w), Math.ceil(h))
+    };
+  }
+
+  collectEntities(drawables, dt, now) {
     for (const npc of state.npcs.values()) {
       this.smooth(npc, dt);
-      drawables.push({ sort: npc.renderY, draw: () => this.drawNpc(npc, originX, originY, size, now) });
+      drawables.push(this.characterDrawable(npc, now, false));
     }
-
     for (const player of state.players.values()) {
       this.smooth(player, dt);
-      drawables.push({ sort: player.renderY, draw: () => this.drawPlayer(player, originX, originY, size, now) });
-    }
-
-    drawables.sort((a, b) => a.sort - b.sort);
-    for (const item of drawables) item.draw();
-
-    this.drawHover(originX, originY, size);
-    this.drawSplats(originX, originY, size, now);
-    this.drawWeatherTint(now);
-  }
-
-  drawProp(art, tx, ty, originX, originY, size, def) {
-    const sprite = objectSprite(art, 32);
-    const tall = def.height === 2 || sprite.height > sprite.width;
-    const drawHeight = tall ? size * 2 : size;
-    const x = Math.round(originX + tx * size);
-    const y = Math.round(originY + ty * size - (tall ? size : 0));
-    this.ctx.drawImage(sprite, x, y, size, drawHeight);
-  }
-
-  drawNpc(npc, originX, originY, size, now) {
-    const ctx = this.ctx;
-    const walking = Math.abs(npc.renderX - npc.x) > 0.05 || Math.abs(npc.renderY - npc.y) > 0.05;
-    const frame = walking ? Math.floor(now / 180) % 2 : npc.anim === 'attack' ? Math.floor(now / 120) % 2 : 0;
-    const sprite = npcSprite(npc.art, frame, 32);
-    const width = size * 1.15;
-    const px = Math.round(originX + npc.renderX * size - (width - size) / 2);
-    const py = Math.round(originY + npc.renderY * size - size * 0.65);
-    this.shadow(originX + npc.renderX * size + size / 2, originY + npc.renderY * size + size * 0.9, size * 0.32);
-    ctx.drawImage(sprite, px, py, width, width * 1.5);
-
-    if (!npc.friendly && npc.hp < npc.maxHp) {
-      this.healthBar(px, py - 6, size, npc.hp / npc.maxHp);
-    }
-    // Townsfolk are always named; creatures only when they are close enough to
-    // matter, so a busy field of monsters stays readable.
-    const distance = Math.max(Math.abs(npc.x - state.self.x), Math.abs(npc.y - state.self.y));
-    const named = npc.friendly || distance <= 6 || state.self.targetId === npc.id;
-    if (state.settings.showNames && named) {
-      this.label(npc.name + (npc.level ? ` (${npc.level})` : ''), px + size / 2, py - 10, npc.friendly ? '#bfe6ff' : '#ffd7a8');
+      drawables.push(this.characterDrawable(player, now, true));
     }
   }
 
-  drawPlayer(player, originX, originY, size, now) {
+  characterDrawable(entity, now, isPlayer) {
     const ctx = this.ctx;
-    const isSelf = player.id === state.playerId;
-    const walking = Math.abs(player.renderX - player.x) > 0.05 || Math.abs(player.renderY - player.y) > 0.05;
-    const frame = walking ? Math.floor(now / 170) % 2 : 0;
-    const sprite = playerSprite(player.appearance || state.appearance, player.look, frame, 32);
-    const width = size * 1.15;
-    const px = Math.round(originX + player.renderX * size - (width - size) / 2);
-    const py = Math.round(originY + player.renderY * size - size * 0.65);
+    const iso = this.isometric;
+    const p = this.project(entity.renderX, entity.renderY);
+    const moving = Math.abs(entity.renderX - entity.x) > 0.04 || Math.abs(entity.renderY - entity.y) > 0.04;
+    const attacking = entity.anim === 'attack' || entity.anim === 'chop' || entity.anim === 'mine';
+    const frame = moving ? Math.floor(now / 170) % 2 : attacking ? Math.floor(now / 130) % 2 : 0;
 
-    this.shadow(originX + player.renderX * size + size / 2, originY + player.renderY * size + size * 0.9, size * 0.3);
-    ctx.globalAlpha = player.dead ? 0.4 : 1;
-    ctx.drawImage(sprite, px, py, width, width * 1.5);
-    ctx.globalAlpha = 1;
+    let sprite;
+    let w;
+    let h;
+    let x;
+    let y;
+    let flip = false;
 
-    if (player.hp < player.maxHp) this.healthBar(px, py - 6, size, player.hp / player.maxHp);
-    if (state.settings.showNames || isSelf) {
-      this.label(player.name || 'Adventurer', px + size / 2, py - 10, isSelf ? '#f2c14e' : '#e8eef5');
+    if (iso) {
+      const facing = isoFacing(entity.dir);
+      flip = facing.flip;
+      sprite = isPlayer
+        ? isoPlayerSprite(entity.appearance || state.appearance, entity.look, frame, facing.view)
+        : isoNpcSprite(entity.art, frame, facing.view);
+      w = ISO_CHAR_W * this.scale;
+      h = ISO_CHAR_H * this.scale;
+      x = Math.round(p.x - w / 2);
+      y = Math.round(p.y + this.halfH * 0.55 - h);
+    } else {
+      sprite = isPlayer
+        ? playerSprite(entity.appearance || state.appearance, entity.look, frame, 32)
+        : npcSprite(entity.art, frame, 32);
+      w = this.tileSize * 1.15;
+      h = w * 1.5;
+      x = Math.round(p.x - w / 2);
+      y = Math.round(p.y - this.tileSize * 0.5 - h + this.tileSize);
     }
-    if (player.chat) this.bubble(player.chat, px + size / 2, py - 26);
+
+    const dead = isPlayer && entity.dead;
+
+    return {
+      depth: iso ? entity.renderX + entity.renderY : entity.renderY,
+      tie: 3,
+      tall: false,
+      bounds: { x, y, w, h },
+      sprite,
+      flip,
+      pick: isPlayer
+        ? (entity.id === state.playerId ? null : { kind: 'player', id: entity.id, entity })
+        : { kind: 'npc', id: entity.id, entity },
+      entity,
+      isPlayer,
+      draw: () => {
+        ctx.globalAlpha = dead ? 0.4 : ctx.globalAlpha;
+        if (flip) {
+          ctx.save();
+          ctx.translate(x + w, y);
+          ctx.scale(-1, 1);
+          ctx.drawImage(sprite, 0, 0, Math.ceil(w), Math.ceil(h));
+          ctx.restore();
+        } else {
+          ctx.drawImage(sprite, x, y, Math.ceil(w), Math.ceil(h));
+        }
+        ctx.globalAlpha = dead ? 1 : ctx.globalAlpha;
+      }
+    };
   }
 
-  shadow(cx, cy, radius) {
-    const ctx = this.ctx;
-    ctx.fillStyle = 'rgba(0,0,0,0.28)';
-    ctx.beginPath();
-    ctx.ellipse(cx, cy, radius, radius * 0.4, 0, 0, Math.PI * 2);
-    ctx.fill();
+  // -------------------------------------------------------------- overlays
+
+  /** Names, health bars and chat bubbles, drawn above every sprite. */
+  drawOverlays(drawables, now) {
+    this.labelRects = [];
+    for (const item of drawables) {
+      if (!item.entity) continue;
+      const entity = item.entity;
+      const topY = item.bounds.y;
+      const centreX = item.bounds.x + item.bounds.w / 2;
+
+      if (item.isPlayer) {
+        if (entity.hp < entity.maxHp) this.healthBar(centreX, topY - 6, item.bounds.w, entity.hp / entity.maxHp);
+        if (state.settings.showNames || entity.id === state.playerId) {
+          this.label(
+            entity.name || 'Adventurer',
+            centreX,
+            topY - 11,
+            entity.id === state.playerId ? '#f2c14e' : '#e8eef5',
+            entity.id === state.playerId
+          );
+        }
+        if (entity.chat) this.bubble(entity.chat, centreX, topY - 26);
+      } else {
+        if (!entity.friendly && entity.hp < entity.maxHp) this.healthBar(centreX, topY - 6, item.bounds.w, entity.hp / entity.maxHp);
+        const distance = Math.max(Math.abs(entity.x - state.self.x), Math.abs(entity.y - state.self.y));
+        const named = entity.friendly || distance <= 6 || state.self.targetId === entity.id;
+        if (state.settings.showNames && named) {
+          this.label(
+            entity.name + (entity.level ? ` (${entity.level})` : ''),
+            centreX,
+            topY - 11,
+            entity.friendly ? '#bfe6ff' : '#ffd7a8',
+            state.self.targetId === entity.id
+          );
+        }
+      }
+    }
   }
 
-  healthBar(x, y, width, fraction) {
+  healthBar(cx, y, width, fraction) {
     const ctx = this.ctx;
-    const w = width * 0.8;
+    const w = Math.max(22, width * 0.62);
     const h = 4;
-    const bx = x + (width - w) / 2;
-    ctx.fillStyle = 'rgba(0,0,0,0.65)';
-    ctx.fillRect(bx - 1, y - 1, w + 2, h + 2);
+    const x = cx - w / 2;
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
     ctx.fillStyle = fraction > 0.5 ? '#58c26f' : fraction > 0.25 ? '#f2c14e' : '#e05e5e';
-    ctx.fillRect(bx, y, Math.max(0, w * fraction), h);
+    ctx.fillRect(x, y, Math.max(0, w * fraction), h);
   }
 
-  label(text, cx, cy, colour) {
+  /**
+   * Draws a name, unless it would land on top of one already drawn this frame.
+   * `force` keeps the player's own name and the current target always visible.
+   */
+  label(text, cx, cy, colour, force = false) {
     const ctx = this.ctx;
     ctx.font = '600 12px "Trebuchet MS", sans-serif';
+    if (this.labelRects) {
+      const width = ctx.measureText(text).width;
+      const rect = { x: cx - width / 2, y: cy - 11, w: width, h: 13 };
+      const collides = this.labelRects.some((other) =>
+        rect.x < other.x + other.w && rect.x + rect.w > other.x &&
+        rect.y < other.y + other.h && rect.y + rect.h > other.y);
+      if (collides && !force) return;
+      this.labelRects.push(rect);
+    }
     ctx.textAlign = 'center';
     ctx.lineWidth = 3;
     ctx.strokeStyle = 'rgba(0,0,0,0.85)';
@@ -311,40 +500,63 @@ export class Renderer {
   bubble(text, cx, cy) {
     const ctx = this.ctx;
     ctx.font = '12px "Trebuchet MS", sans-serif';
-    const width = Math.min(220, ctx.measureText(text).width + 14);
-    ctx.fillStyle = 'rgba(18,25,33,0.92)';
+    const clipped = text.length > 34 ? `${text.slice(0, 33)}…` : text;
+    const width = Math.min(240, ctx.measureText(clipped).width + 16);
+    const x = cx - width / 2;
+    const y = cy - 20;
+    ctx.fillStyle = 'rgba(18,25,33,0.94)';
     ctx.strokeStyle = '#f2c14e';
     ctx.lineWidth = 1;
-    const x = cx - width / 2;
-    const y = cy - 18;
     roundRect(ctx, x, y, width, 20, 6);
     ctx.fill();
     ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(cx - 4, y + 20);
+    ctx.lineTo(cx + 4, y + 20);
+    ctx.lineTo(cx, y + 25);
+    ctx.closePath();
+    ctx.fill();
     ctx.fillStyle = '#e8eef5';
     ctx.textAlign = 'center';
-    ctx.fillText(text.length > 34 ? `${text.slice(0, 33)}…` : text, cx, y + 14);
+    ctx.fillText(clipped, cx, y + 14);
     ctx.textAlign = 'left';
   }
 
-  drawHover(originX, originY, size) {
+  drawHover() {
     if (!this.hoverTile) return;
     const { x, y } = this.hoverTile;
     if (x < 0 || y < 0 || x >= this.world.width || y >= this.world.height) return;
     const ctx = this.ctx;
-    ctx.strokeStyle = 'rgba(242,193,78,0.8)';
+    const p = this.project(x, y);
+    ctx.strokeStyle = 'rgba(242,193,78,0.85)';
     ctx.lineWidth = 2;
-    ctx.strokeRect(Math.round(originX + x * size) + 1, Math.round(originY + y * size) + 1, size - 2, size - 2);
+    if (this.isometric) {
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y - this.halfH);
+      ctx.lineTo(p.x + this.halfW, p.y);
+      ctx.lineTo(p.x, p.y + this.halfH);
+      ctx.lineTo(p.x - this.halfW, p.y);
+      ctx.closePath();
+      ctx.stroke();
+    } else {
+      const size = this.tileSize;
+      ctx.strokeRect(Math.round(p.x - size / 2) + 1, Math.round(p.y - size / 2) + 1, size - 2, size - 2);
+    }
   }
 
-  drawSplats(originX, originY, size, now) {
+  drawSplats(now) {
     const ctx = this.ctx;
     state.splats = state.splats.filter((splat) => now - splat.born < SPLAT_LIFETIME);
     for (const splat of state.splats) {
-      const entity = state.npcs.get(splat.id) || state.players.get(splat.id) || (splat.id === state.playerId ? { renderX: state.self.x, renderY: state.self.y } : null);
+      const entity =
+        state.npcs.get(splat.id) ||
+        state.players.get(splat.id) ||
+        (splat.id === state.playerId ? { renderX: state.self.x, renderY: state.self.y } : null);
       if (!entity) continue;
       const progress = (now - splat.born) / SPLAT_LIFETIME;
-      const px = originX + (entity.renderX ?? entity.x) * size + size / 2;
-      const py = originY + (entity.renderY ?? entity.y) * size - progress * 26;
+      const p = this.project(entity.renderX ?? entity.x, entity.renderY ?? entity.y);
+      const px = p.x;
+      const py = p.y - (this.isometric ? 34 : 20) - progress * 26;
       ctx.globalAlpha = 1 - progress;
       const hit = splat.kind === 'hit' && splat.damage > 0;
       ctx.fillStyle = hit ? '#c0392b' : '#4a5c6b';
@@ -360,8 +572,7 @@ export class Renderer {
     }
   }
 
-  /** A gentle vignette; also flashes red briefly when the player is hurt. */
-  drawWeatherTint(now) {
+  drawVignette() {
     const ctx = this.ctx;
     const gradient = ctx.createRadialGradient(
       this.cssWidth / 2, this.cssHeight / 2, Math.min(this.cssWidth, this.cssHeight) * 0.35,
@@ -378,6 +589,76 @@ export class Renderer {
       this.label('You were knocked out. Waking up…', this.cssWidth / 2, this.cssHeight / 2, '#ffd7a8');
     }
   }
+
+  // --------------------------------------------------------------- picking
+
+  /**
+   * What did the player click on? Hit-tests the sprites actually drawn last
+   * frame, front to back — the only reliable way to pick in an isometric scene
+   * where sprites overlap several tiles.
+   *
+   * The test is per-pixel, not per-rectangle: a signpost or a tree is mostly
+   * empty space inside its bounding box, and a bounding-box test lets it steal
+   * clicks aimed at whoever is standing behind it.
+   */
+  pick(px, py) {
+    let transparentFallback = null;
+
+    for (let i = this.drawables.length - 1; i >= 0; i -= 1) {
+      const item = this.drawables[i];
+      if (!item.pick) continue;
+      const b = item.bounds;
+      if (px < b.x || px > b.x + b.w || py < b.y || py > b.y + b.h) continue;
+
+      if (this.spriteHit(item, px, py)) return item.pick;
+      // Remember the nearest thing whose box we were inside, in case nothing
+      // scores a solid pixel (tiny sprites, rounding at high zoom).
+      if (!transparentFallback && item.pick.kind !== 'object') transparentFallback = item.pick;
+    }
+
+    if (transparentFallback) return transparentFallback;
+    const tile = this.unproject(px, py);
+    return { kind: 'tile', x: tile.x, y: tile.y };
+  }
+
+  /** True when the sprite has a non-transparent pixel under (px, py). */
+  spriteHit(item, px, py) {
+    const sprite = item.sprite;
+    if (!sprite) return true; // no art to test against: treat the box as solid
+    const b = item.bounds;
+    let u = ((px - b.x) / b.w) * sprite.width;
+    const v = ((py - b.y) / b.h) * sprite.height;
+    if (item.flip) u = sprite.width - u;
+    const mask = alphaMask(sprite);
+    if (!mask) return true;
+    const x = Math.min(sprite.width - 1, Math.max(0, Math.floor(u)));
+    const y = Math.min(sprite.height - 1, Math.max(0, Math.floor(v)));
+    return mask[y * sprite.width + x] > 24;
+  }
+}
+
+/**
+ * One-byte-per-pixel alpha mask for a sprite, built once and cached against the
+ * canvas. Sprites are generated once and reused, so this costs a single
+ * getImageData per distinct sprite for the life of the page.
+ */
+const maskCache = new WeakMap();
+
+function alphaMask(sprite) {
+  const cached = maskCache.get(sprite);
+  if (cached) return cached;
+  try {
+    const ctx = sprite.getContext('2d');
+    const { data } = ctx.getImageData(0, 0, sprite.width, sprite.height);
+    const mask = new Uint8Array(sprite.width * sprite.height);
+    for (let i = 0; i < mask.length; i += 1) mask[i] = data[i * 4 + 3];
+    maskCache.set(sprite, mask);
+    return mask;
+  } catch {
+    // Tainted canvas or no 2d context: fall back to bounding-box picking.
+    maskCache.set(sprite, null);
+    return null;
+  }
 }
 
 function roundRect(ctx, x, y, w, h, r) {
@@ -392,7 +673,8 @@ function roundRect(ctx, x, y, w, h, r) {
 
 /**
  * Minimap: the terrain is rasterised once into an offscreen canvas, then only
- * the viewport box and entity dots are redrawn each frame.
+ * the entity dots are redrawn each frame. It stays top-down in both
+ * projections — a map you glance at should be a map, not a diamond.
  */
 export class Minimap {
   constructor(canvas, world) {
@@ -481,7 +763,6 @@ export class Minimap {
     ctx.strokeRect(0.5, 0.5, size - 1, size - 1);
   }
 
-  /** Minimap click -> world tile, so players can walk by tapping the map. */
   toWorld(px, py) {
     const size = this.canvas.width;
     const tilesVisible = 46;

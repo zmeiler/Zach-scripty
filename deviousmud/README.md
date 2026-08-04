@@ -1,8 +1,9 @@
 # DeviousMud
 
-A family-friendly, tile-based browser MMORPG. Explore Emberfall Village, train ten
+A family-friendly, isometric browser MMORPG. Explore Emberfall Village, train ten
 skills, finish four quests, fight mischievous (never gruesome) creatures, and meet
-other players in a shared world.
+other players in a shared world. Prefer the classic flat view? One switch in
+Options turns the whole world top-down.
 
 * **No dependencies.** No npm install, no build step, no image or audio files.
   Clone it and run `npm start`.
@@ -48,6 +49,7 @@ npm start          # http://localhost:8080
 | Toggle run | `R`, or click the green orb | 🏃 button |
 | Close menu or window | `Esc` | Tap outside |
 | Zoom | Options → Zoom | Pinch |
+| Switch view | Options → View (isometric or top-down) | Options → View |
 
 ### The first ten minutes
 

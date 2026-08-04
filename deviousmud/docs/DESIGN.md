@@ -198,6 +198,7 @@ column of floating touch buttons (run, chat, panels) appears.
 | Hitpoints orb | Ring fills with current/max; number in the centre |
 | Energy orb | Run energy; click or `R` toggles walking/running |
 | Minimap | Terrain rasterised once, entity dots each frame; click to walk |
+| View toggle | Options → View switches isometric / top-down, remembered per browser |
 | Hint bar | Names the action a left click would perform |
 | Action menu | Right click or long press; first entry is the left-click action |
 | Inventory | 4 × 7 grid, drag to rearrange, click to use, right click for options |
@@ -211,16 +212,53 @@ column of floating touch buttons (run, chat, panels) appears.
 
 ### 4.4 Rendering
 
-There are no image files. `client/js/sprites.js` draws every tile, prop, creature
-and item icon with canvas primitives, caching each as an offscreen bitmap keyed by
-type and variant. Characters are composed from appearance values plus the item ids
-in each equipment slot, so armour appears on other players without sending
-anything but ids.
+The default view is **isometric**; a top-down view is one switch away in Options.
+The simulation is unaware of either — it only ever deals in tile coordinates, so
+the projection lives entirely in `client/js/iso.js` and `renderer.js`.
 
-The renderer runs on `requestAnimationFrame`, smoothing every entity towards its
-last server position (and snapping on teleports), so 600 ms ticks look continuous.
-Draw order is terrain → y-sorted props, ground items and characters → health bars,
-names, chat bubbles → hit splats → vignette.
+**Projection.** Tiles are 2:1 diamonds, 64 x 32 at zoom 1:
+
+```
+screenX = (tx - ty) * 32        tx = (screenY/16 + screenX/32) / 2
+screenY = (tx + ty) * 16        ty = (screenY/16 - screenX/32) / 2
+```
+
+Depth is `tx + ty`: anything further south or east is nearer the camera and is
+drawn later. Tiles on the same diagonal share a depth and never overlap.
+
+**Art.** There are still no image files. `client/js/isoSprites.js` draws the
+isometric set — diamond floors with grain, tufts and slab joints; walls and
+cliffs as cubes with a lit top and two shaded faces; trees, rocks, furnaces and
+the fountain as props that stand on a diamond footprint; characters in
+three-quarter view. One light source, above and to the north-west, drives every
+surface through three brightness factors (`FACE.top/left/right`), which is what
+makes the scene read as one set of objects rather than a pile of sprites.
+`client/js/sprites.js` keeps the top-down art and all the flat UI item icons.
+
+**Anchoring** is a single convention: floors are centred on the tile centre,
+props put their bottom edge on the tile's lower vertex (their sprite includes
+the footprint), and characters stand with their feet just below the tile centre.
+
+**Facing.** Four directions come from two drawings: a front and a back view,
+mirrored horizontally. East and south face the camera; north and west face away.
+
+**Occlusion.** A wall or tree standing between the camera and the player fades
+to 42% while it would cover them, so you are never hidden inside your own
+building.
+
+**Picking** hit-tests the sprites actually drawn last frame, front to back, per
+pixel rather than per rectangle — a signpost is mostly empty space inside its
+bounding box, and a box test lets it steal clicks aimed at whoever stands
+behind it. Alpha masks are built once per sprite and cached.
+
+**Labels** are suppressed when they would collide with a name already drawn that
+frame; your own name and your current target always win.
+
+The renderer runs on `requestAnimationFrame`, easing every entity towards its
+last server position (and snapping on teleports), so 600 ms ticks look
+continuous. Draw order is floors → depth-sorted solids, props, ground items and
+characters → health bars, names, chat bubbles → hit splats → vignette. The
+minimap stays top-down in both projections: a map you glance at should be a map.
 
 ### 4.5 Accessibility
 

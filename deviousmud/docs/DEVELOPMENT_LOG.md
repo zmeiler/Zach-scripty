@@ -188,6 +188,74 @@ never costs items; and the game makes no third-party requests at all.
 
 ---
 
+---
+
+## Phase 7 — Going isometric
+
+The flat top-down view worked, but it read as a map rather than a place. Turning
+the camera was a contained change *because* of the earlier architecture: the
+engine only ever deals in tile coordinates, so nothing in `shared/` moved. The
+work was projection maths, a new art set, and picking.
+
+### The projection
+
+Tiles became 2:1 diamonds — `screenX = (tx-ty)·32`, `screenY = (tx+ty)·16` — with
+depth `tx + ty`, so anything further south or east draws later. `client/js/iso.js`
+holds the maths and nothing else, which means it has no DOM imports and the whole
+projection is unit-testable in Node: six tests now cover the round trip from tile
+to screen and back, depth ordering, and the shading helper.
+
+### Custom isometric art
+
+`client/js/isoSprites.js` is a second art set drawn for the new angle: diamond
+floors with grain and slab joints, walls and cliffs as cubes with a lit top and
+two shaded faces, props standing on a diamond footprint, and characters in
+three-quarter view. One decision does most of the work — a single light source
+above and to the north-west, expressed as three brightness factors that *every*
+surface uses. Without that, hand-drawn shapes look like a pile of unrelated
+sprites; with it, they look like one world.
+
+Four facings come from two drawings: a front and a back view, mirrored. East and
+south face the camera, north and west face away.
+
+### Bug: buildings that looked like kerbs
+
+The first render had walls that read as low steps, not walls. The cube sprite was
+sized `ISO_TILE_H + height + ISO_TILE_H/2` but its faces were drawn from an
+offset that pushed the bottom of the block past the canvas edge, so every wall
+was silently cropped. Fixed by deriving the geometry from one rule — the sprite
+is exactly `ISO_TILE_H + height` tall and its lowest point sits on the bottom
+edge — which is the same anchoring rule the props already used.
+
+### Bug: a signpost stealing clicks meant for an NPC
+
+The new picking hit-tested the sprites drawn last frame, front to back, using
+their bounding boxes. But a signpost is a thin post inside a 64 x 94 box that is
+almost entirely transparent, and it draws after the tile behind it — so clicking
+Tutor Pip, who stands next to one, read the signpost instead. The scripted test
+caught it as "dialogue never opened", and the screenshot showed why: the wrong
+tile highlighted, and the signpost's text in the chat log.
+
+**Solution:** per-pixel picking. Each drawable now records the sprite it drew
+with, and the pick maps the cursor into sprite space (mirroring when the sprite
+was flipped) and reads an alpha mask before accepting the hit. Masks are built
+once per sprite and cached in a `WeakMap`, so it costs one `getImageData` per
+distinct sprite for the life of the page. Clicking the signpost's actual post
+still selects the signpost.
+
+### Occlusion and labels
+
+Two smaller touches that matter more than they sound. A wall or tree between the
+camera and the player fades to 42% while it would cover them, so you are never
+lost inside your own building. And names are suppressed when they would overlap
+one already drawn that frame — before that, standing next to Banker Cyrus
+rendered the two names on top of each other as an unreadable smear.
+
+The top-down renderer was kept and is one switch away in Options, which also
+means the projection-independent parts of the renderer are exercised both ways.
+
+---
+
 ## What I would do next
 
 1. **Persistence**: swap the JSON store for SQLite. `AccountStore`'s five methods
@@ -199,4 +267,8 @@ never costs items; and the game makes no third-party requests at all.
    world has room for a proper mine interior once multi-level maps exist.
 4. **Testing**: the browser playthrough is a script in the scratchpad. Promoting
    it into the repository as a smoke test would catch UI regressions the unit
-   tests cannot see — it is what caught the two worst bugs in this project.
+   tests cannot see — it is what caught the worst bugs in this project, including
+   both isometric ones.
+5. **Art**: the isometric set has one obvious gap — buildings have walls but no
+   roofs, because a roof would need either a cutaway or a fade of its own. The
+   occlusion fade already in place is the hook that would make it work.

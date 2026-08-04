@@ -466,7 +466,7 @@ const METAL_COLOURS = {
   leather: '#8d6e63'
 };
 
-function metalOf(itemId) {
+export function metalOf(itemId) {
   if (!itemId) return null;
   for (const [key, colour] of Object.entries(METAL_COLOURS)) {
     if (itemId.startsWith(key)) return colour;

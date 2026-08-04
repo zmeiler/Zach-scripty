@@ -330,6 +330,10 @@ function buildSettings() {
   body.innerHTML = '';
 
   body.append(
+    choiceSetting('View', 'projection', [
+      { value: 'iso', label: 'Isometric' },
+      { value: 'topdown', label: 'Top-down' }
+    ]),
     toggleSetting('Show names above characters', 'showNames'),
     toggleSetting('Sound effects', 'sound'),
     toggleSetting('High contrast', 'highContrast', () => applyAccessibility()),
@@ -351,6 +355,38 @@ function buildSettings() {
   body.append(help);
 
   applyAccessibility();
+}
+
+/** A small segmented control for settings with two or three choices. */
+function choiceSetting(label, key, options) {
+  const wrap = document.createElement('div');
+  wrap.className = 'setting';
+  const text = document.createElement('span');
+  text.textContent = label;
+  const group = document.createElement('div');
+  group.className = 'chip-row';
+  group.setAttribute('role', 'radiogroup');
+  group.setAttribute('aria-label', label);
+  for (const option of options) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'chip';
+    button.textContent = option.label;
+    button.setAttribute('role', 'radio');
+    button.setAttribute('aria-checked', String(state.settings[key] === option.value));
+    button.addEventListener('click', () => {
+      state.settings[key] = option.value;
+      saveSettings();
+      for (const sibling of group.children) {
+        sibling.setAttribute('aria-checked', String(sibling === button));
+        sibling.classList.toggle('active', sibling === button);
+      }
+    });
+    button.classList.toggle('active', state.settings[key] === option.value);
+    group.append(button);
+  }
+  wrap.append(text, group);
+  return wrap;
 }
 
 function toggleSetting(label, key, after) {

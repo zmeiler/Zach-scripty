@@ -39,6 +39,7 @@ export const bus = new Emitter();
 const SETTINGS_KEY = 'deviousmud.settings.v1';
 
 const defaultSettings = {
+  projection: 'iso',
   zoom: 1,
   sound: true,
   music: false,
