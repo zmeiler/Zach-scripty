@@ -20,6 +20,9 @@ import { sanitizeAppearance } from '../shared/appearance.js';
 import { AccountStore, validateName } from './accounts.js';
 import { attachWebSocketServer } from './websocket.js';
 import { createStaticHandler } from './static.js';
+import { ChatGuard, ModerationStore, REPORT_REASONS, describePenalty, isReservedName } from './moderation.js';
+import { ConnectionLimiter, LIMITS, LoginThrottle, SlidingWindow, normaliseAddress } from './limits.js';
+import { isCommand, loginRefusalMessage, runCommand } from './commands.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(here, '..');
@@ -28,12 +31,23 @@ const PORT = Number(process.env.PORT || 8080);
 const HOST = process.env.HOST || '0.0.0.0';
 const DATA_FILE = process.env.DM_DATA || path.join(projectRoot, 'server', 'data', 'accounts.json');
 const AUTOSAVE_TICKS = Math.round(30000 / TICK_MS);
-const MAX_COMMANDS_PER_SECOND = 40;
 const MAX_PLAYERS = Number(process.env.DM_MAX_PLAYERS || 200);
+const DATA_DIR = path.dirname(DATA_FILE);
 
 const accounts = new AccountStore(DATA_FILE);
 const world = buildWorld();
 const game = new Game({ world });
+
+// Moderators are named at boot: DM_ADMINS="Zach,Rowan". They can then promote
+// others in game with /mod, which persists.
+const moderation = new ModerationStore({
+  dir: DATA_DIR,
+  admins: String(process.env.DM_ADMINS || '').split(',').map((n) => n.trim()).filter(Boolean)
+});
+const chatGuard = new ChatGuard();
+const connections = new ConnectionLimiter();
+const loginThrottle = new LoginThrottle();
+const registrations = new SlidingWindow(60 * 60_000, LIMITS.registrationsPerHour);
 
 /** connectionId -> { conn, playerId, name, isGuest, commandBudget } */
 const sessions = new Map();
@@ -63,7 +77,9 @@ const httpServer = http.createServer(async (req, res) => {
         maxPlayers: MAX_PLAYERS,
         tick: game.tickCount,
         uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
-        worldChecksum: world.checksum
+        worldChecksum: world.checksum,
+        moderated: moderation.stats().admins > 0,
+        chatLogged: moderation.keepChatLog
       });
       res.writeHead(200, {
         'Content-Type': 'application/json; charset=utf-8',
@@ -92,17 +108,39 @@ attachWebSocketServer(httpServer, { path: '/ws', onConnection: handleConnection 
 
 function handleConnection(conn) {
   const id = `c${nextConnectionId += 1}`;
-  const session = { id, conn, playerId: null, name: null, isGuest: false, commands: 0, windowStart: Date.now() };
+  const address = normaliseAddress(conn.remoteAddress);
+
+  // One address may only hold so many sockets open at once.
+  if (!connections.add(address)) {
+    conn.sendJson({ t: 'authError', reason: 'Too many connections from your network. Close a tab and try again.' });
+    conn.close(1008, 'Connection limit');
+    return;
+  }
+
+  const session = {
+    id,
+    conn,
+    address,
+    playerId: null,
+    name: null,
+    isGuest: false,
+    commands: 0,
+    windowStart: Date.now(),
+    lastActive: Date.now(),
+    connectedAt: Date.now()
+  };
   sessions.set(id, session);
 
   conn.sendJson({
     t: 'hello',
     protocol: PROTOCOL_VERSION,
     online: playerSessions.size,
-    motd: 'Welcome to Emberfall. Be kind, explore everything.'
+    motd: 'Welcome to Emberfall. Be kind, explore everything.',
+    reportReasons: REPORT_REASONS
   });
 
   conn.on('message', (raw) => {
+    session.lastActive = Date.now();
     if (!rateLimit(session)) {
       conn.close(1008, 'Slow down');
       return;
@@ -130,6 +168,13 @@ function handleConnection(conn) {
       disconnect(session, 'You have been logged out.');
       return;
     }
+    if (msg.t === 'report') {
+      handleReport(session, msg).catch((err) => console.error('[report]', err));
+      return;
+    }
+    if (msg.t === 'chat') {
+      if (!handleChat(session, msg)) return;
+    }
     game.handle(session.playerId, msg);
     flushOutbox();
   });
@@ -142,6 +187,7 @@ function handleConnection(conn) {
   conn.on('close', () => {
     disconnect(session);
     sessions.delete(id);
+    connections.remove(address);
   });
 }
 
@@ -152,13 +198,108 @@ function rateLimit(session) {
     session.commands = 0;
   }
   session.commands += 1;
-  return session.commands <= MAX_COMMANDS_PER_SECOND;
+  // A connection that has not logged in has nothing useful to send but `auth`
+  // and `ping`, so it gets a much smaller budget.
+  const budget = session.playerId ? LIMITS.commandsPerSecond : LIMITS.preAuthCommandsPerSecond;
+  return session.commands <= budget;
+}
+
+/**
+ * Public chat: checked for mutes and flooding before the engine broadcasts it,
+ * and recorded so a later report has context. Slash commands are handled here
+ * and never reach the engine.
+ *
+ * @returns true when the message should continue on to the engine
+ */
+function handleChat(session, msg) {
+  const text = String(msg.text || '').trim();
+  if (!text) return false;
+
+  if (isCommand(text)) {
+    runCommand(text, commandContext(session)).catch((err) => {
+      console.error('[command]', err);
+      reply(session, 'That command went wrong. Please tell a moderator.');
+    });
+    return false;
+  }
+
+  const muted = moderation.muteStatus(session.name);
+  if (muted) {
+    reply(session, describePenalty(muted, 'muted'));
+    return false;
+  }
+
+  const guard = chatGuard.check(session.name, text);
+  if (!guard.ok) {
+    // What someone tried to say is evidence as much as what got through.
+    moderation.noteChat(session.name, text, 'blocked');
+    const entry = moderation.mute(session.name, Math.ceil(LIMITS.chatAutoMuteSeconds / 60), `automatic: chat ${guard.reason}`, 'system');
+    reply(session, `${guard.message} Chat is paused for a moment.`);
+    console.log(`[mod] auto-mute target=${session.name} reason=${guard.reason}`);
+    void entry;
+    return false;
+  }
+
+  moderation.noteChat(session.name, text);
+  return true;
+}
+
+async function handleReport(session, msg) {
+  const target = String(msg.target || '').trim();
+  const reason = REPORT_REASONS.find((r) => r.id === msg.reason)?.id || 'other';
+  if (!target) return;
+  if (target.toLowerCase() === session.name.toLowerCase()) {
+    reply(session, 'You cannot report yourself.');
+    return;
+  }
+  const result = await moderation.addReport({
+    reporter: session.name,
+    target,
+    reason,
+    note: msg.note
+  });
+  reply(
+    session,
+    result.ok
+      ? `Thank you. A moderator will read your report about ${target}. You did the right thing telling someone.`
+      : result.reason
+  );
+  if (result.ok) notifyModerators(`New report from ${session.name} about ${target} (${reason}).`);
+}
+
+function reply(session, text, channel = 'system') {
+  session.conn.sendJson({ t: 'msg', text, channel });
+}
+
+function commandContext(session) {
+  return {
+    session,
+    moderation,
+    reply: (text, channel) => reply(session, text, channel),
+    announce: (text) => {
+      for (const other of playerSessions.values()) reply(other, text);
+    },
+    findSession: (name) => {
+      const key = String(name || '').toLowerCase();
+      return [...playerSessions.values()].find((s) => s.name.toLowerCase() === key) || null;
+    },
+    disconnect: (target, why) => disconnect(target, why),
+    onlineNames: () => [...playerSessions.values()].map((s) => s.name),
+    notifyModerators
+  };
+}
+
+/** Tells every moderator who is online that something needs attention. */
+function notifyModerators(text) {
+  for (const session of playerSessions.values()) {
+    if (moderation.isAdmin(session.name)) reply(session, text);
+  }
 }
 
 async function handleAuth(session, msg) {
   if (session.playerId) return;
   if (playerSessions.size >= MAX_PLAYERS) {
-    session.conn.sendJson({ t: 'authError', reason: 'Emberfall is full right now. Try again shortly.' });
+    refuse(session, 'Emberfall is full right now. Try again shortly.');
     return;
   }
 
@@ -168,10 +309,43 @@ async function handleAuth(session, msg) {
   let save = null;
   let isGuest = false;
 
+  // Failed attempts are throttled by address and by account name, so neither
+  // "one password against many accounts" nor "many passwords against one
+  // account" gets far.
+  const addressKey = `ip:${session.address}`;
+  const nameKey = `name:${name.toLowerCase()}`;
+  for (const throttleKey of [addressKey, nameKey]) {
+    const wait = loginThrottle.blockedFor(throttleKey);
+    if (wait > 0) {
+      refuse(session, loginRefusalMessage(wait));
+      return;
+    }
+  }
+
+  // A ban is checked before anything else so a banned player cannot even see
+  // whether a password was right.
+  const preBan = moderation.banStatus(name);
+  if (preBan) {
+    refuse(session, describePenalty(preBan, 'banned'));
+    return;
+  }
+
   if (mode === 'register') {
+    if (accounts.accounts.size >= LIMITS.maxAccounts) {
+      refuse(session, 'This world is not taking new characters right now.');
+      return;
+    }
+    if (!registrations.hit(session.address)) {
+      refuse(session, 'That is a lot of new characters from one place. Please try again later.');
+      return;
+    }
+    if (isReservedName(name)) {
+      refuse(session, 'That name is reserved. Please pick another.');
+      return;
+    }
     const result = await accounts.register(name, String(msg.password || ''), appearance);
     if (!result.ok) {
-      session.conn.sendJson({ t: 'authError', reason: result.reason });
+      refuse(session, result.reason);
       return;
     }
     name = result.account.name;
@@ -179,25 +353,39 @@ async function handleAuth(session, msg) {
   } else if (mode === 'login') {
     const result = await accounts.authenticate(name, String(msg.password || ''));
     if (!result.ok) {
-      session.conn.sendJson({ t: 'authError', reason: result.reason });
+      const wait = Math.max(loginThrottle.fail(addressKey), loginThrottle.fail(nameKey));
+      refuse(session, wait > 0 ? loginRefusalMessage(wait) : result.reason);
       return;
     }
+    loginThrottle.succeed(addressKey);
+    loginThrottle.succeed(nameKey);
     name = result.account.name;
     save = result.account.save && result.account.save.skills ? result.account.save : null;
   } else {
     const check = validateName(name || 'Guest');
     if (!check.ok) {
-      session.conn.sendJson({ t: 'authError', reason: check.reason });
+      refuse(session, check.reason);
+      return;
+    }
+    if (isReservedName(check.name)) {
+      refuse(session, 'That name is reserved. Please pick another.');
       return;
     }
     name = check.name;
     isGuest = true;
   }
 
+  // The resolved name may differ in case from what was typed.
+  const ban = moderation.banStatus(name);
+  if (ban) {
+    refuse(session, describePenalty(ban, 'banned'));
+    return;
+  }
+
   // One live character per name.
   for (const other of playerSessions.values()) {
     if (other.name.toLowerCase() === name.toLowerCase()) {
-      session.conn.sendJson({ t: 'authError', reason: 'That character is already logged in.' });
+      refuse(session, 'That character is already logged in.');
       return;
     }
   }
@@ -210,7 +398,19 @@ async function handleAuth(session, msg) {
 
   game.addPlayer(playerId, { name, appearance, save });
   flushOutbox();
-  console.log(`[login] ${name}${isGuest ? ' (guest)' : ''} - ${playerSessions.size} online`);
+
+  const mute = moderation.muteStatus(name);
+  if (mute) reply(session, describePenalty(mute, 'muted'));
+  if (moderation.isAdmin(name)) reply(session, 'You are a moderator here. Type /help for your commands.');
+  if (moderation.keepChatLog) {
+    reply(session, 'Be kind: public chat is recorded so moderators can help. Type /report to tell us about a problem.');
+  }
+
+  console.log(`[login] ${name}${isGuest ? ' (guest)' : ''} from ${session.address} - ${playerSessions.size} online`);
+}
+
+function refuse(session, reason) {
+  session.conn.sendJson({ t: 'authError', reason });
 }
 
 function disconnect(session, reason) {
@@ -247,10 +447,38 @@ function autosave() {
 }
 
 let loopTimer = null;
+let sweepTimer = null;
+
+/** Disconnects sessions that have gone quiet, and ages out limiter state. */
+function sweep() {
+  const now = Date.now();
+  for (const session of sessions.values()) {
+    if (!session.playerId) {
+      // A connection that never logs in is not allowed to sit there forever.
+      if (now - session.connectedAt > LIMITS.preAuthTimeoutMs) {
+        session.conn.close(1000, 'No sign in');
+      }
+      continue;
+    }
+    if (now - session.lastActive > LIMITS.idleTimeoutMs) {
+      reply(session, 'You have been away a while, so we saved your character and signed you out.');
+      disconnect(session, 'Idle');
+      session.conn.close(1000, 'Idle');
+    }
+  }
+  moderation.prune(now);
+  loginThrottle.sweep(now);
+  registrations.sweep(now);
+}
 
 async function start() {
   const loaded = await accounts.load();
   console.log(`[data] ${loaded} account(s) loaded from ${DATA_FILE}`);
+  const modStats = await moderation.load();
+  console.log(`[data] moderation: ${modStats.mutes} mute(s), ${modStats.bans} ban(s), ${modStats.admins} moderator(s), chat log ${moderation.keepChatLog ? 'on' : 'off'}`);
+  if (modStats.admins === 0) {
+    console.log('[data] no moderators configured - set DM_ADMINS="YourName" to appoint one');
+  }
 
   httpServer.listen(PORT, HOST, () => {
     console.log(`\n  ${GAME_NAME} is running`);
@@ -268,14 +496,19 @@ async function start() {
       console.error('[tick]', err);
     }
   }, TICK_MS);
+
+  sweepTimer = setInterval(sweep, 30_000);
+  sweepTimer.unref?.();
 }
 
 async function shutdown(signal) {
   console.log(`\n[${signal}] shutting down...`);
   if (loopTimer) clearInterval(loopTimer);
+  if (sweepTimer) clearInterval(sweepTimer);
   autosave();
   try {
     await accounts.flush();
+    await moderation.flush();
   } catch (err) {
     console.error('[shutdown] save failed:', err.message);
   }

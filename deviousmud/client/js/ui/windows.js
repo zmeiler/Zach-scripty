@@ -5,6 +5,7 @@
  */
 
 import { itemName, ITEMS, shopSellPrice } from '../../../shared/items.js';
+import { REPORT_REASONS } from '../../../shared/reports.js';
 import { actions } from '../actions.js';
 import { bus, state } from '../state.js';
 import { itemIcon } from '../sprites.js';
@@ -283,6 +284,53 @@ function inventoryStrip(onClick, titleFor) {
     return empty;
   }
   return strip;
+}
+
+// ---------------------------------------------------------------- report
+
+/**
+ * Reporting a player. Opened by the client rather than the server, because it
+ * must work the instant something upsetting happens — no round trip, no
+ * waiting, and one tap to send.
+ */
+export function openReportWindow(name) {
+  showWindow(`Report ${name}`);
+
+  const intro = document.createElement('p');
+  intro.className = 'muted';
+  intro.textContent = `Tell a moderator what happened with ${name}. Reports are private, and the chat around it is included so we can see for ourselves.`;
+  bodyEl.append(intro);
+
+  const list = document.createElement('div');
+  list.className = 'report-reasons';
+  for (const reason of REPORT_REASONS) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = reason.label;
+    button.addEventListener('click', () => {
+      actions.report(name, reason.id, noteInput.value.trim());
+      hideWindow();
+    });
+    list.append(button);
+  }
+  bodyEl.append(list);
+
+  const noteLabel = document.createElement('label');
+  noteLabel.className = 'report-note';
+  noteLabel.textContent = 'Anything else we should know? (optional)';
+  const noteInput = document.createElement('input');
+  noteInput.type = 'text';
+  noteInput.maxLength = 200;
+  noteInput.placeholder = 'What happened?';
+  noteLabel.append(noteInput);
+  bodyEl.append(noteLabel);
+
+  const reassure = document.createElement('p');
+  reassure.className = 'muted';
+  reassure.textContent = 'If something online upsets you, it is always okay to tell a grown-up you trust.';
+  bodyEl.append(reassure);
+
+  list.querySelector('button')?.focus({ preventScroll: true });
 }
 
 // -------------------------------------------------------------- dialogue

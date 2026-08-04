@@ -256,6 +256,80 @@ means the projection-independent parts of the renderer are exercised both ways.
 
 ---
 
+---
+
+## Phase 8 — Moderation and abuse limits
+
+The honest assessment before this phase was that the game had no moderation at
+all: a word-list chat filter and nothing else. No report button, no mute, no
+kick, no ban, no record of what was said. For a game aimed at children that is
+the most serious gap on the list, because the failure mode is not a crash — it
+is a child seeing something.
+
+### What players got
+
+A report button in the People panel and in the right-click menu, opening a
+window with six plain-language reasons ("Rude or unkind words", "Asking for
+personal details"), an optional note, and one line that matters more than the
+rest: *if something online upsets you, it is always okay to tell a grown-up you
+trust*. The window is opened by the client, not the server, so it appears the
+instant something upsetting happens.
+
+A report attaches the last 25 lines of chat automatically. An accusation with no
+context puts the moderator in the position of choosing who to believe; a
+transcript does not.
+
+### What operators got
+
+Mutes, kicks, bans and moderator promotion as slash commands, with every action
+logged with who did it and why, and moderators online pinged when a report
+arrives. Bans are checked *before* the password, so a banned player cannot even
+learn whether they typed it correctly. State persists to `moderation.json`
+atomically, so a restart does not forgive anyone.
+
+### The limits
+
+Nothing above the engine was rate limited before. Now: connections per address,
+a much smaller command budget before sign-in, a timeout for sockets that never
+authenticate, an idle disconnect, a registration cap per address and in total,
+and exponential login backoff keyed by address *and* account name — because
+throttling only by address lets someone hammer one account from a phone, and
+throttling only by name lets someone try one password against every account.
+
+### Detail: the chat guard is separate from the command limit
+
+A player fighting sends dozens of commands a second and that is fine. Eight chat
+messages in ten seconds never is. Two limits, because one number cannot serve
+both. Tripping the chat guard auto-mutes for a minute rather than disconnecting:
+the fix for an excited nine-year-old is a pause, not an ejection.
+
+### Bug: Modest Pete could not create a character
+
+The reserved-name check refused anything starting with a staff word, so nobody
+called **Modest** Pete, Modesty or Devon could play — "mod" and "dev" are three
+letters and appear inside ordinary names. Caught by a test asserting that
+ordinary names are allowed, which is the assertion people forget to write.
+
+The rule now matches short words exactly and long words anywhere: `mod` must be
+the whole name, while `xX_admin` is refused because it *contains* `admin`.
+Names are compared after flattening lookalike characters, so `M0derator` and
+`Admın` are caught too.
+
+### Verifying it
+
+Eighteen unit tests cover the store and the limiters, and a scripted run drives
+two real browsers through the whole thing: the nuisance spams and is
+auto-muted, the moderator files a report and reads it back with `/reports`,
+mutes them and sees the notice arrive on the other client, then bans them and
+watches the reconnect be refused with the reason and expiry. Non-moderators are
+told the commands are not theirs, reserved names are refused, and nine wrong
+passwords produce "Too many attempts. Please wait 15 seconds."
+
+That last one caught something real: my own test hit the registration cap after
+four characters from one address, which is exactly what it is for.
+
+---
+
 ## What I would do next
 
 1. **Persistence**: swap the JSON store for SQLite. `AccountStore`'s five methods

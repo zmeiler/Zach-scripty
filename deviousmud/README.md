@@ -194,16 +194,76 @@ talk to, the title screen offers solo play; multiplayer needs the Node server.
 
 ## Safety and moderation
 
-DeviousMud is built to be readable over a child's shoulder:
+DeviousMud is built to be readable over a child's shoulder, and to be
+*operable* by one adult.
 
-* Server-side chat filtering strips URLs, email addresses and phone numbers, and
-  masks unkind words — the filter runs before any message reaches another player.
-* No player-to-player combat, no gambling, no item loss on defeat, no voice chat,
-  no external links, no advertising, no third-party requests of any kind.
-* Names are validated to a strict character set and 3–12 characters.
-* Passwords are stored only as scrypt hashes with a per-account salt.
-* A per-connection rate limit (40 commands/second) and a 256 KB frame cap keep a
-  hostile client from flooding the server.
+### For players
+
+* **Report anyone, in two taps.** People panel → Report, or right-click a
+  player → Report. Six plain-language reasons, an optional note, and the
+  surrounding chat is attached automatically so a moderator can see for
+  themselves. `/report <name> [what happened]` does the same from the chat box.
+* **Public chat is filtered server-side** for URLs, email addresses, phone
+  numbers and unkind words, before any other player receives it.
+* **Chat is recorded** so moderators can review what happened. Players are told
+  this on login. Set `DM_CHAT_LOG=off` to disable it.
+* No player-versus-player combat, no gambling, no item loss on defeat, no voice
+  chat, no external links, no advertising, no third-party requests of any kind.
+
+### For moderators
+
+Name your moderators at boot; they can appoint others in game.
+
+```bash
+DM_ADMINS="Zach,Rowan" npm start
+```
+
+| Command | What it does |
+| --- | --- |
+| `/help` | Lists the commands you can use |
+| `/who` | Who is online |
+| `/mute <name> <minutes> [reason]` | Stops someone chatting; `0` = until lifted |
+| `/unmute <name>` | Lifts it |
+| `/kick <name> [reason]` | Disconnects someone |
+| `/ban <name> <hours> [reason]` | Keeps someone out; `0` = until lifted |
+| `/unban <name>` | Lets them back |
+| `/reports [count]` | The most recent reports |
+| `/mod <name>` · `/unmod <name>` | Grant or remove moderator |
+| `/say <message>` | Announce to everyone |
+
+Every action is logged to the console with who did it and why. Moderators
+online are pinged when a new report arrives.
+
+Three files under the data directory hold the record:
+
+| File | Contents |
+| --- | --- |
+| `moderation.json` | Mutes, bans and moderators (atomic writes, survives restart) |
+| `reports.jsonl` | One report per line, with the chat around it |
+| `chat.log` | Public chat, tab-separated, rotated at 8 MB |
+
+### Abuse limits
+
+All are environment variables, with defaults suited to a small friendly server.
+
+| Limit | Variable | Default |
+| --- | --- | --- |
+| Connections per address | `DM_MAX_CONN_PER_IP` | 8 |
+| Commands per second (signed in) | `DM_MAX_COMMANDS` | 40 |
+| Commands per second (before sign in) | `DM_MAX_PREAUTH_COMMANDS` | 8 |
+| Seconds before an unauthenticated socket is dropped | `DM_PREAUTH_TIMEOUT` | 45,000 ms |
+| Failed logins before a cool-off | `DM_LOGIN_FAILURES` | 6 |
+| New characters per address per hour | `DM_REGISTRATIONS_PER_HOUR` | 4 |
+| Total accounts the server will hold | `DM_MAX_ACCOUNTS` | 5,000 |
+| Chat messages per ten seconds | `DM_CHAT_PER_10S` | 8 |
+| Idle disconnect | `DM_IDLE_TIMEOUT` | 30 min |
+| Reports per player per hour | `DM_REPORTS_PER_HOUR` | 10 |
+
+Failed logins back off exponentially, keyed by **both** address and account
+name, so neither "one password against many accounts" nor "many passwords
+against one account" gets far. Names that read as staff (`admin`, `M0derator`)
+or as an NPC are refused at creation. Passwords are stored only as scrypt hashes
+with a per-account salt.
 
 ---
 
@@ -213,9 +273,11 @@ DeviousMud is built to be readable over a child's shoulder:
 npm test
 ```
 
-32 tests cover world generation and reachability, pathfinding, the experience
+56 tests cover world generation and reachability, pathfinding, the experience
 curve, inventory rules, combat maths, quest progression, shops, banking, trading,
-chat filtering, and the server's tolerance of malformed commands.
+chat filtering, the isometric projection, and the moderation and abuse limits —
+mutes, bans that survive a restart, report context, flood and repeat detection,
+reserved names, connection caps and login backoff.
 
 ---
 

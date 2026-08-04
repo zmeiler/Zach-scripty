@@ -363,13 +363,45 @@ The tick loop is O(players + NPCs); the per-player state message dominates cost,
 which is why it is view-limited and delta-versioned. Multiple worlds would run as
 multiple processes behind the proxy, one `Game` each.
 
-### 5.6 Security
+### 5.6 Moderation and abuse limits
+
+Two modules, deliberately outside the engine: moderation is about *accounts and
+connections*, not about game rules, and keeping it out of `shared/` means the
+simulation stays pure and testable.
+
+`server/limits.js` holds every "how much may one stranger do" answer: a sliding
+-window counter, a per-address connection cap, and a login throttle that backs
+off exponentially and is keyed by address *and* account name. All values are
+environment variables (see README).
+
+`server/moderation.js` holds mutes, bans, moderators, reports and the chat
+record. Mutes and bans are `{ until, reason, by, at }` keyed by lower-cased
+name, written atomically to `moderation.json`; `until: 0` means "until a
+moderator lifts it". Reports append to `reports.jsonl` with the last 25 lines of
+surrounding chat, including messages the flood guard *blocked* — what someone
+tried to say is evidence too. A `ChatGuard` catches flooding and repetition
+separately from the general command limit, because forty commands a second is
+normal in a fight while eight messages in ten seconds never is.
+
+`server/commands.js` interprets slash commands typed in chat. They are handled
+before the message reaches the engine, so a player can never make another
+player's client run one.
+
+The chat path for one message is therefore: rate limit → slash command? →
+mute check → flood/repeat guard → record for context → engine broadcast.
+
+Chat logging is on by default and disclosed to players on login. For a game
+aimed at children, being able to answer "what happened?" is a safety feature;
+hiding that it happens would not be. `DM_CHAT_LOG=off` turns it off.
+
+### 5.7 Security
 
 * Everything from the client is treated as hostile: types coerced, indices bounds
   checked, ids resolved against server state, and every action re-validated for
   reach, level, cost and space.
-* Rate limit of 40 commands/second per connection; oversized frames close the
-  socket.
+* Rate limit of 40 commands/second per connection (8 before sign-in); oversized
+  frames close the socket; unauthenticated sockets are dropped after 45 seconds
+  and idle players after 30 minutes.
 * Static file serving resolves each path against the document root and refuses
   anything that escapes it; responses carry `nosniff` and frame-options headers.
 * No third-party requests, no CDN, no analytics, no cookies — the only stored

@@ -13,6 +13,7 @@ import { actions } from '../actions.js';
 import { bus, pushChat, state, saveSettings } from '../state.js';
 import { itemIcon } from '../sprites.js';
 import { inventoryActions, openMenu } from './menu.js';
+import { openReportWindow } from './windows.js';
 
 const SLOT_LABELS = {
   head: 'Head', cape: 'Cape', amulet: 'Neck', weapon: 'Weapon', body: 'Body',
@@ -313,11 +314,19 @@ function renderSocial() {
   for (const player of others) {
     const li = document.createElement('li');
     li.innerHTML = `<span>${player.name || 'Adventurer'}${player.level ? ` (level ${player.level})` : ''}</span>`;
+    const buttons = document.createElement('span');
+    buttons.className = 'player-actions';
     const trade = document.createElement('button');
     trade.className = 'small';
     trade.textContent = 'Trade';
     trade.addEventListener('click', () => actions.interact('player', player.id, 'trade'));
-    li.append(trade);
+    const report = document.createElement('button');
+    report.className = 'small quiet';
+    report.textContent = 'Report';
+    report.title = `Tell a moderator about ${player.name || 'this player'}`;
+    report.addEventListener('click', () => openReportWindow(player.name || 'Adventurer'));
+    buttons.append(trade, report);
+    li.append(buttons);
     list.append(li);
   }
   document.getElementById('onlineCount').textContent = `${others.length + 1} in view`;

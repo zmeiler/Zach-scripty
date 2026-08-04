@@ -59,6 +59,9 @@ export const actions = {
   closeWindow() {
     send({ t: 'closeUI' });
   },
+  report(target, reason, note) {
+    send({ t: 'report', target, reason, note });
+  },
   appearance(appearance) {
     send({ t: 'appearance', appearance });
   },

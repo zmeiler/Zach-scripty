@@ -467,6 +467,14 @@ h1 {
 .trade-status { margin-top: 0.5rem; font-size: 0.85rem; color: var(--ink-dim); }
 .trade-status.ready { color: var(--good); }
 
+/* Report window */
+.report-reasons { display: grid; gap: 6px; margin-bottom: 0.9rem; }
+.report-reasons button { text-align: left; min-height: 46px; }
+.report-note { display: grid; gap: 0.35rem; font-size: 0.85rem; color: var(--ink-dim); margin-bottom: 0.75rem; }
+.player-actions { display: flex; gap: 4px; }
+button.quiet { background: transparent; color: var(--ink-dim); }
+button.quiet:hover { background: var(--bg-slot); color: var(--ink); }
+
 /* ------------------------------------------------------ touch extras */
 .touch-controls {
   position: fixed; right: 10px; bottom: 200px; z-index: 30;

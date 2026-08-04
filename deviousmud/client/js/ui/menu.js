@@ -9,6 +9,7 @@ import { OBJECT_TYPES } from '../../../shared/world.js';
 import { ITEMS, itemName } from '../../../shared/items.js';
 import { actions } from '../actions.js';
 import { pushChat, state } from '../state.js';
+import { openReportWindow } from './windows.js';
 
 const menuEl = document.getElementById('contextMenu');
 let openFor = null;
@@ -48,6 +49,7 @@ export function worldActions(pick) {
         { label: `Follow ${player.name || 'player'}`, run: () => actions.interact('player', player.id, 'follow') },
         { label: `Trade with ${player.name || 'player'}`, run: () => actions.interact('player', player.id, 'trade') },
         { label: `Examine ${player.name || 'player'}`, run: () => actions.interact('player', player.id, 'examine') },
+        { label: `Report ${player.name || 'player'}`, run: () => openReportWindow(player.name || 'Adventurer') },
         { label: 'Walk here', run: () => actions.walkTo(player.x, player.y) }
       ];
     }
