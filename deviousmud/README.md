@@ -1,9 +1,10 @@
 # DeviousMud
 
 A family-friendly, isometric browser MMORPG. Explore Emberfall Village, train ten
-skills, finish four quests, fight mischievous (never gruesome) creatures, and meet
-other players in a shared world. Prefer the classic flat view? One switch in
-Options turns the whole world top-down.
+skills, finish eight quests, fight mischievous (never gruesome) creatures, and
+descend three levels of a mine to settle something very large and very warm that
+has been dreaming too hot for a hundred years. Prefer the classic flat view? One
+switch in Options turns the whole world top-down.
 
 * **No dependencies.** No npm install, no build step, no image or audio files.
   Clone it and run `npm start`.
@@ -64,6 +65,27 @@ npm start          # http://localhost:8080
 
 Being defeated costs you nothing but a walk back: you wake by the fountain with
 your items and experience intact.
+
+### Going down
+
+Finish **The Deep Seam** for Miner Mira and the old shaft in Copper Hollow opens.
+Below it are three levels, each darker and harder than the one above:
+
+| Level | What is down there |
+| --- | --- |
+| **Copper Hollow Mine** | Eight galleries of copper, tin, iron and coal. Bats, crawlers and dust sprites. Foreman Dorn, who has kept the braziers lit for thirty years. |
+| **The Deep Seam** | Mithril, and coal by the cartload. Coal lurkers, shale hounds, deep golems and crystal beetles. |
+| **The Ember Chamber** | Adamant, cinder guardians, and **Cinderheart** — an enormous, well-meaning forge spirit having a bad dream. |
+
+**Take a light.** Bea sells torches for a few coins and a miner's lantern for
+rather more; Foreman Dorn gives you one for finding him. Without one you will see
+about two tiles, and the mine is not a small place. A friend carrying a lantern
+lights your way too.
+
+Cinderheart is the end of the game as it currently stands. Expect to need full
+adamant, a combat level around 70, and a bag full of food; expect the fight to
+take a minute and a half; and expect it to yawn and go back to sleep rather than
+come to any harm.
 
 ---
 
@@ -273,11 +295,16 @@ with a per-account salt.
 npm test
 ```
 
-56 tests cover world generation and reachability, pathfinding, the experience
+100 tests cover world generation and reachability, pathfinding, the experience
 curve, inventory rules, combat maths, quest progression, shops, banking, trading,
-chat filtering, the isometric projection, and the moderation and abuse limits —
-mutes, bans that survive a restart, report context, flood and repeat detection,
-reserved names, connection caps and login backoff.
+chat filtering, the isometric projection, the moderation and abuse limits, the
+mine's four planes (each one proved connected by flood fill, and proved sealed
+off from every other), light and darkness, the boss's phases, and a run through
+the whole four-quest mine chain in the real engine.
+
+Two of those tests exist because of bugs they caught: every creature is checked
+to hit exactly as hard as its definition says it does, and every quest in the
+game is checked to be both startable and finishable by some real conversation.
 
 ---
 

@@ -330,6 +330,151 @@ four characters from one address, which is exactly what it is for.
 
 ---
 
+## Phase 9 — Depth: a vertical dimension, and a mine to put in it
+
+The world so far was one 96 × 96 grid and everything in the engine quietly
+assumed it. The goal of this phase was a mine that goes *down* — three levels,
+darkness, ore worth the walk, and something at the bottom worth fighting.
+
+### Deciding what a "plane" is
+
+The engine change is one field, `plane`, on every entity. The design decision
+was what that field *means*, and I settled on the strictest reading available: a
+plane is a sealed world. Nothing on one plane can see, path to, hit, hear, loot
+or trade with anything on another.
+
+That is more restrictive than it strictly needs to be, and it is worth every
+line, because the alternative is a long tail of "how did that happen?" bugs —
+an aggressive creature following you up a ladder, a click from before the climb
+landing on the thing that was under the cursor two seconds ago, a chat message
+audible three floors down. Each of those is a guard in a different file, and
+each has a test.
+
+The one accommodation to the existing code: every accessor takes the plane as an
+*optional last argument* defaulting to the surface. `isWalkable(world, x, y)`
+still means what it always meant. That kept the diff to the places that actually
+needed to think about depth, and the existing 56 tests passed unchanged.
+
+### Hand-laid, not generated
+
+My first instinct was to generate the mine procedurally, in keeping with the
+surface. I wrote the room-and-corridor generator, looked at it, and threw it
+away. A random cave is a maze; a designed one is a place. Every room in the mine
+now has a reason to exist — an ore face, a junction, a chamber to fight in — and
+the corridors are short enough that you always know roughly which way the ladder
+is.
+
+The floor plan is exported as `MINE_ROOMS`, so a creature spawn or a quest step
+names *the coal face on level two* rather than a pair of numbers that would then
+have to be kept in step by hand. Moving a gallery moves everything in it.
+
+### Bug: the wall ring ate the map
+
+Carved floors get a wall drawn around them, and everything else stays `VOID`
+(drawn as nothing, so a level reads as an island of worked stone rather than a
+rectangle with a border). My first version walked the grid setting any `VOID`
+tile next to a floor tile to wall — in place. Each new wall was itself non-void,
+so it seeded the next one, and the whole 9,216-tile plane filled in like a flood
+fill. 6,578 of 9,216 tiles "carved".
+
+The fix is one word: decide the ring from a snapshot, apply it afterwards. The
+symptom was obvious in a single printed number, which is why I printed it.
+
+### Darkness
+
+Each plane carries a darkness value and an ambient colour. The renderer covers
+the world in a sheet of that colour and light sources punch holes in it. This
+has to happen on a *separate* offscreen canvas, because `destination-out` cuts
+through whatever is on the canvas you are drawing to — composite it directly and
+you erase the world instead of the shadow.
+
+Light radius is computed by the server and streamed, for the player and for
+everyone in view. That is not paranoia about cheating so much as consistency:
+one authority for "how far can this person see" means a friend with a lantern
+genuinely lights your way, and there is no second implementation to disagree.
+
+Two small decisions made the dark feel fair rather than annoying. A candle-sized
+glow always surrounds the player, so arriving without a torch is difficult
+rather than impossible. And climbing into the dark empty-handed prints a line
+saying so, with where to buy one — nobody should learn they needed a lantern by
+walking into a wall.
+
+### Bug: every creature hit twice as hard as its definition said
+
+Balancing the boss, I noticed a player in full adamant losing to it in fifteen
+seconds. The boss definition said `maxHit: 18`; it was hitting for 34.
+
+`npcCombatStats` was converting `maxHit` into a strength *bonus* by multiplying
+by twelve. Max hit is a function of strength level and strength bonus together,
+and an NPC's strength level is its attack level — so the constant only lines up
+while the two happen to be similar, which they were for every creature that
+existed when the code was written (a level-24 golem, a level-11 wolf). By the
+time something attacks at 70, the stated number is meaningless.
+
+The fix is to invert the max-hit formula and solve for the bonus, so `maxHit`
+means what it says at any level. A test now asserts it for every creature in the
+game, present and future. Several existing creatures got very slightly stronger,
+in the direction their own definitions had always claimed.
+
+### Balancing by simulation rather than by feel
+
+Rather than guess at the boss's numbers, I ran the fight — a scripted player at
+four gear tiers, eating when low, against the real engine. The first pass said
+190 hp was still unwinnable at level 70, because a defence of 62 made the boss
+nearly unhittable. Defence came down to 44 and the curve landed where I wanted
+it:
+
+| Gear | Level | Result |
+| --- | --- | --- |
+| Steel | 40 | loses badly |
+| Mithril | 50 | loses |
+| Adamant | 65 | reaches one third health, loses |
+| Adamant | 70 | wins in about 95 seconds |
+
+The same script showed both boss phases firing, which is how I knew the phase
+thresholds were placed somewhere a real fight actually reaches.
+
+### The boss looked like a rat
+
+Every NPC was drawn at one size. Cinderheart has 190 hitpoints and a name, and
+on screen it was the same 48 × 72 sprite as a giant rat. NPC definitions gained
+a `size`, streamed with the rest, and the renderer multiplies by it. How large
+something is drawn is the only warning a player gets before they click on it.
+
+While I was there: the aggression message read "The cinderheart takes an
+interest in you", because it lowercased the name and prefixed "the". Named
+creatures now get a `proper` flag, and a helper decides between *the giant rat*
+and *Cinderheart*.
+
+### Quests: testing for the bug that does not crash
+
+The four new quests walk a player down the shaft one level at a time. The
+interesting part was the test.
+
+A broken quest is the worst kind of bug in a game like this, because nothing
+crashes — the player simply, quietly, cannot finish. So before playing the chain
+through, the suite walks every dialogue tree in the game collecting every effect,
+and asserts that each of the eight quests is offered by *some* conversation and
+completed by *some* conversation, and that every item, creature and NPC any quest
+names actually exists. Those five assertions would have caught a typo in a node
+id that no amount of playing the *new* content would have revealed.
+
+Then it plays the whole chain: Mira's first line, the torch, the climb, Dorn,
+six bats, four crawlers, eight iron, the second ladder, three mithril, a bar,
+three golems, two ember shards, three guardians, Cinderheart, and the
+Forge-warden's ring.
+
+### Verifying it
+
+Beyond the 100 unit tests: a scripted browser walked from the fountain to the
+mine mouth, clicked down through all three levels and back up to the surface,
+with no console errors; a second run screenshotted each level lit and unlit; a
+third fought the boss through both phases by clicking its sprite. Reading those
+screenshots is what found the boss-size problem and the "the cinderheart"
+wording, neither of which any test would have flagged.
+
+---
+
 ## What I would do next
 
 1. **Persistence**: swap the JSON store for SQLite. `AccountStore`'s five methods
@@ -337,8 +482,9 @@ four characters from one address, which is exactly what it is for.
 2. **Bandwidth**: the per-tick state message re-sends positions for everything in
    view. Sending only entities whose position changed would cut it several-fold
    before it ever matters.
-3. **Content**: the engine already supports everything a fifth quest needs; the
-   world has room for a proper mine interior once multi-level maps exist.
+3. **Content**: the plane dimension that carries the mine would carry a second
+   dungeon, building interiors or an upper storey at the cost of a floor plan
+   and some art — the engine work is done.
 4. **Testing**: the browser playthrough is a script in the scratchpad. Promoting
    it into the repository as a smoke test would catch UI regressions the unit
    tests cannot see — it is what caught the worst bugs in this project, including

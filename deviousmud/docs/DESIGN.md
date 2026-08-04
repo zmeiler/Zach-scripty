@@ -28,32 +28,80 @@ the files that implement it.
 
 ## 2. The world
 
-**Emberfall** is a 96 × 96 tile island, generated deterministically from a seed by
-`shared/world.js`. The map is never transmitted: both sides run `buildWorld()` and
-compare a checksum at login.
+**Emberfall** is a stack of four 96 × 96 tile *planes*, generated
+deterministically from a seed by `shared/world.js`. The map is never
+transmitted: both sides run `buildWorld()` and compare a checksum at login.
 
-| Region | Location | Contains |
-| --- | --- | --- |
-| Emberfall Village | centre | Bank, general store, smithy (furnace + anvil), kitchen (range), fountain, eight townsfolk |
-| Whispering Woods | north | Trees, oaks, willows, forest wolves, goblin scamps |
-| Copper Hollow | west | Copper, tin, iron and coal rocks; cave imps; rock golems |
-| Lake Serene | east | Shrimp, trout and salmon fishing spots, sandy shore, willows |
-| Sunny Meadow | south | Flowers, giant rats, meadow boars, goblin scamps |
+Plane 0 is the surface. Planes 1–3 are the mine that descends under Copper
+Hollow.
+
+| Region | Plane | Location | Contains |
+| --- | --- | --- | --- |
+| Emberfall Village | 0 | centre | Bank, general store, smithy (furnace + anvil), kitchen (range), fountain, eight townsfolk |
+| Whispering Woods | 0 | north | Trees, oaks, willows, forest wolves, goblin scamps |
+| Copper Hollow | 0 | west | Copper, tin, iron and coal rocks; cave imps; rock golems; the mine mouth |
+| Lake Serene | 0 | east | Shrimp, trout and salmon fishing spots, sandy shore, willows |
+| Sunny Meadow | 0 | south | Flowers, giant rats, meadow boars, goblin scamps |
+| Copper Hollow Mine | 1 | below | Eight galleries; copper through coal; bats, crawlers, dust sprites; Foreman Dorn |
+| The Deep Seam | 2 | below | Eight galleries; mithril, coal, iron; coal lurkers, shale hounds, deep golems, crystal beetles |
+| The Ember Chamber | 3 | below | A landing, an approach and one large hall; adamant; ember wisps, cinder guardians, **Cinderheart** |
+
+### Planes
+
+A plane is a sealed world. It owns its own tile array, its own object list and
+its own object index; nothing on one plane can see, path to, hit, hear or loot
+anything on another. Every entity — player, NPC, ground item, dynamic object,
+world object — carries a `plane`, saved and restored with the character.
+
+Every accessor takes the plane as an optional last argument defaulting to the
+surface (`tileAt(world, x, y, plane = 0)`), so code that only ever meant the
+overworld is unaffected. `findPath` searches one plane and never leaves it: a
+ladder is an *action*, not a step, which is what keeps the pathfinder honest.
+
+The mine levels are hand-laid rather than randomly generated — a random cave is
+a maze, a designed one is a place. Rooms are named rectangles, corridors are
+L-shaped tunnels between named rooms, and the wall ring is derived from whatever
+was carved. Everything else stays `VOID`, drawn as nothing at all, so a level
+reads as an island of worked stone rather than a rectangle with a border. The
+floor plan is exported as `MINE_ROOMS`, so creature spawns and quest steps name
+a gallery instead of repeating coordinates.
+
+### Darkness and light
+
+Each plane carries a `dark` value from 0 (daylight) and an `ambient` colour. The
+surface is 0; the mine runs 0.55, 0.78 and 0.45 — the Ember Chamber lights
+itself. The renderer covers the world in a sheet of the plane's ambient colour
+and light sources punch holes in it.
+
+Light comes from the best source a player carries — a torch, a miner's lantern,
+Willow's lantern — and the *server* computes the radius and streams it, for the
+player and for everyone else in view, so a friend with a lantern lights your way
+and a client cannot light its own. Braziers burn at every landing and down the
+walls of the boss chamber; campfires light too. A small glow always surrounds
+the player, so arriving without a torch is difficult rather than impossible, and
+anyone who climbs into the dark empty-handed is told where to buy one.
 
 ### Tiles
 
 `GRASS, DARKGRASS, FLOWERS, PATH, GRAVEL, WATER, SAND, STONE, WALL, PLANK,
-BRIDGE, CAVE, ROCKFACE`. `WATER`, `WALL` and `ROCKFACE` are impassable, as is any
+BRIDGE, CAVE, ROCKFACE, MINE_FLOOR, MINE_WALL, EMBER, CRYSTAL, VOID`. `WATER`,
+`WALL`, `ROCKFACE`, `MINE_WALL`, `CRYSTAL` and `VOID` are impassable, as is any
 tile holding a blocking object (trees, rocks, furniture) — a felled tree still
-leaves a stump in the way.
+leaves a stump in the way. Each mine level has its own floor and wall, so a
+glance at the screen tells you how deep you are without a word of interface.
 
 ### World objects
 
-Defined in `OBJECT_TYPES` (`shared/world.js`): trees (3 tiers), rocks (4 tiers),
+Defined in `OBJECT_TYPES` (`shared/world.js`): trees (3 tiers), rocks (6 tiers),
 fishing spots (3 tiers), bank booths, shop counter, furnace, anvil, cooking range,
-fountain, signposts, and player-created campfires. Each carries a single action
-descriptor — skill, level, XP, tool, yield, respawn delay — which is the only
-place those numbers exist.
+fountain, signposts, braziers, mine carts, ladders, the mine mouth, and
+player-created campfires. Each carries a single action descriptor — skill, level,
+XP, tool, yield, respawn delay — which is the only place those numbers exist.
+
+Ladders and the mine mouth carry a `link` on the *instance* — which plane and
+tile they deliver you to — so the type says only what it looks like and what the
+menu entry reads. Each pair points at the other, so climbing either way leaves
+you at the foot of the one you would use to go back.
 
 ---
 
@@ -133,7 +181,7 @@ requirements are checked server-side on every equip.
 
 ### 3.6 Quests
 
-Four quests, data-driven in `shared/quests.js`, each a list of stages with a
+Eight quests, data-driven in `shared/quests.js`, each a list of stages with a
 single objective (`collect`, `kill`, `action` or `talk`). Collect/kill/action
 stages advance themselves; `talk` stages wait for the hand-in conversation.
 
@@ -143,6 +191,17 @@ stages advance themselves; `talk` stages wait for the hand-in conversation.
 | Willow's Lost Lantern | Novice | Recover lantern glass from cave imps | 400 coins, steel axe, 750 xp |
 | Wolves at the Gate | Intermediate | See off five forest wolves | 800 coins, bronze platebody + shield, 3.1k xp |
 | The Deep Seam | Experienced | Smelt 4 bronze bars, defeat 2 golems, recover an ancient coin | 1,500 coins, guardian blade, 7.4k xp |
+| Lights in the Dark | Novice | Get a torch, climb into the mine, find Foreman Dorn | 600 coins, miner's lantern, 1.2k xp |
+| The Foreman's Tally | Intermediate | Clear the upper galleries, mine 8 iron | 1,200 coins, miner's boots, 5.3k xp |
+| Deeper Than Dorn Went | Experienced | Reach the Deep Seam, mine and smelt mithril, see off 3 deep golems | 2,500 coins, mithril pickaxe, 17.5k xp |
+| The Sleeping Forge | Master | Two ember shards, past the guardians, settle Cinderheart | 6,000 coins, Forge-warden's ring, 60k xp |
+
+The last four form a chain that paces the descent: each requires the one before
+it *and* a skill floor, so the mine is walked down a level at a time rather than
+sprinted through. A dead-end quest is the worst bug this kind of game can have —
+nothing crashes, the player just quietly cannot finish — so the test suite
+asserts that every quest in the game is offered by some dialogue, completed by
+some dialogue, and names only items, creatures and NPCs that exist.
 
 Conversations are data too (`shared/dialogue.js`): each NPC has entry rules
 evaluated against quest state and inventory, then a node graph whose options can
@@ -329,10 +388,17 @@ Server → client: `hello`, `login`, `state` (every tick), `inventory`, `skills`
 `quests`, `msg`, `chat`, `dialogue`, `shop`, `bank`, `craft`, `trade`, `closeUI`,
 `effect`, `authError` — delivered inside a `batch` envelope.
 
-A `state` message carries only what the player can see (17-tile radius): self
-status, nearby players and NPCs, ground items, changed object states, and this
-tick's hit splats. Appearance and equipment are versioned per player and re-sent
-only when they change or when someone new comes into view.
+A `state` message carries only what the player can see — 17 tiles, **on their own
+plane**: self status, nearby players and NPCs, ground items, changed object
+states, and this tick's hit splats. Appearance and equipment are versioned per
+player and re-sent only when they change or when someone new comes into view;
+changing plane clears the version cache in both directions, since from every
+other player's point of view you simply vanished.
+
+A `plane` message is sent the instant a ladder is used, ahead of the state
+message, so the client can swap levels and snap the camera in the same frame
+rather than easing across half the map. It carries the plane's id, name,
+darkness and ambient colour.
 
 ### 5.4 Data model
 
@@ -411,18 +477,38 @@ hiding that it happens would not be. `DM_CHAT_LOG=off` turns it off.
 
 ## 6. Testing
 
-`npm test` runs 32 tests in Node's built-in runner with a seeded RNG: world
-determinism and fixture reachability, corner-safe pathfinding, the experience
-curve, container rules, combat bounds, login/save/restore, gathering and smelting,
-combat and respawn, quest progression and gating, shop and bank arithmetic, the
-full trade lifecycle, chat filtering, and a fuzz-ish pass of malformed commands
-that must not break the tick.
+`npm test` runs 100 tests in Node's built-in runner with a seeded RNG.
+
+* **Engine (32)** — world determinism and fixture reachability, corner-safe
+  pathfinding, the experience curve, container rules, combat bounds,
+  login/save/restore, gathering and smelting, combat and respawn, quest
+  progression and gating, shop and bank arithmetic, the full trade lifecycle,
+  chat filtering, and a fuzz-ish pass of malformed commands that must not break
+  the tick.
+* **Isometric projection (6)** — round-tripping tile ↔ screen, depth ordering.
+* **Moderation and abuse limits (18)** — mutes, bans that survive a restart,
+  report context, flood and repeat detection, reserved names, connection caps,
+  login backoff.
+* **Planes, light and the boss (35)** — each mine level is one connected space
+  (proved by flood fill), every ladder lands somewhere you can stand, nothing
+  sees or hits or hears across a plane, pathfinding never leaves its plane, a
+  player can climb the whole way down and back, saves restore underground,
+  every creature spawns somewhere walkable and hits exactly as hard as its
+  definition says, and a boss's phases fire once each and reset when you walk
+  away.
+* **Quests (9)** — every quest can be started and finished by *some* dialogue
+  and names only things that exist, requirements form a chain with no loop, and
+  the whole four-quest mine chain plays through the real engine end to end.
 
 ---
 
 ## 7. Ideas deliberately left out
 
 Player-versus-player combat, item loss, trading with strangers by whisper, and
-any external link — each conflicts with pillar 1. Multi-floor dungeons, a grand
-exchange, ranged and magic combat, and seasonal events are all natural next steps
+any external link — each conflicts with pillar 1. A grand exchange, ranged and
+magic combat, party/group play and seasonal events are all natural next steps
 that the current data-driven content layer would support without engine changes.
+
+Multi-floor dungeons *were* on this list, and are now the largest feature in the
+game; the plane dimension that carries them would also carry building interiors,
+a second dungeon, or an upper storey, at the cost of a floor plan and some art.
