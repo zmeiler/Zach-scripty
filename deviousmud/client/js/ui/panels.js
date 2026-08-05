@@ -37,6 +37,7 @@ export function initPanels() {
   bus.on('skills', renderSkills);
   bus.on('quests', renderQuests);
   bus.on('state', renderSocial);
+  bus.on('party', renderSocial);
   bus.on('window', () => renderInventory());
   renderInventory();
   renderEquipment();
@@ -303,6 +304,7 @@ function buildSocial() {
 }
 
 function renderSocial() {
+  renderParty();
   const list = document.getElementById('playerList');
   const others = [...state.players.values()].filter((player) => player.id !== state.playerId);
   list.innerHTML = '';
@@ -320,6 +322,19 @@ function renderSocial() {
     trade.className = 'small';
     trade.textContent = 'Trade';
     trade.addEventListener('click', () => actions.interact('player', player.id, 'trade'));
+    // Only offered when it could work: you cannot invite someone already with
+    // you, and a full party has nothing to offer anybody.
+    const inParty = state.party?.members.some((member) => member.id === player.id);
+    const full = state.party && state.party.members.length >= 5;
+    const isLeader = !state.party || state.party.leaderId === state.playerId;
+    if (!inParty && !full && isLeader) {
+      const invite = document.createElement('button');
+      invite.className = 'small';
+      invite.textContent = 'Invite';
+      invite.title = `Invite ${player.name || 'this player'} to your party`;
+      invite.addEventListener('click', () => actions.party('invite', { id: player.id }));
+      buttons.append(invite);
+    }
     const report = document.createElement('button');
     report.className = 'small quiet';
     report.textContent = 'Report';
@@ -330,6 +345,117 @@ function renderSocial() {
     list.append(li);
   }
   document.getElementById('onlineCount').textContent = `${others.length + 1} in view`;
+}
+
+/**
+ * The party block at the top of the People panel: pending invitations first,
+ * because they are the only thing here that lapses, then the party itself with
+ * a health bar and a line saying where each member is.
+ */
+function renderParty() {
+  const host = document.getElementById('partyBox');
+  if (!host) return;
+  host.innerHTML = '';
+
+  for (const invite of state.partyInvites || []) {
+    const box = document.createElement('div');
+    box.className = 'party-invite';
+    const line = document.createElement('p');
+    line.textContent = `${invite.from} has invited you to a party.`;
+    const actionsRow = document.createElement('div');
+    actionsRow.className = 'party-actions';
+    const accept = document.createElement('button');
+    accept.className = 'small primary';
+    accept.textContent = 'Join';
+    accept.addEventListener('click', () => actions.party('accept', { party: invite.party }));
+    const decline = document.createElement('button');
+    decline.className = 'small quiet';
+    decline.textContent = 'No thanks';
+    decline.addEventListener('click', () => actions.party('decline', { party: invite.party }));
+    actionsRow.append(accept, decline);
+    box.append(line, actionsRow);
+    host.append(box);
+  }
+
+  const party = state.party;
+  if (!party) return;
+
+  const box = document.createElement('div');
+  box.className = 'party-box';
+  const heading = document.createElement('h3');
+  heading.innerHTML = `<span>Party</span><span class="count">${party.members.length}/5</span>`;
+  box.append(heading);
+
+  const list = document.createElement('ul');
+  list.className = 'party-members';
+  for (const member of party.members) {
+    const li = document.createElement('li');
+    li.className = 'party-member';
+
+    const who = document.createElement('div');
+    who.className = 'who';
+    if (party.leaderId === member.id) {
+      const crown = document.createElement('span');
+      crown.className = 'crown';
+      crown.textContent = '★';
+      crown.title = 'Party leader';
+      who.append(crown);
+    }
+    const name = document.createElement('span');
+    name.textContent = member.id === state.playerId ? `${member.name} (you)` : member.name;
+    who.append(name);
+    li.append(who);
+
+    if (party.leaderId === state.playerId && member.id !== state.playerId) {
+      const remove = document.createElement('button');
+      remove.className = 'small quiet';
+      remove.textContent = '✕';
+      remove.title = `Remove ${member.name} from the party`;
+      remove.addEventListener('click', () => actions.party('remove', { id: member.id }));
+      li.append(remove);
+    } else {
+      li.append(document.createTextNode(''));
+    }
+
+    if (member.maxHp) {
+      const fraction = Math.max(0, Math.min(1, member.hp / member.maxHp));
+      const bar = document.createElement('div');
+      bar.className = `party-hp${fraction <= 0.25 ? ' low' : fraction <= 0.5 ? ' hurt' : ''}`;
+      const fill = document.createElement('span');
+      fill.style.width = `${fraction * 100}%`;
+      bar.append(fill);
+      li.append(bar);
+    }
+
+    const where = document.createElement('div');
+    const elsewhere = member.plane !== undefined && member.plane !== state.self.plane;
+    where.className = elsewhere ? 'where away' : 'where';
+    where.textContent = member.dead
+      ? 'Knocked out'
+      : member.offline
+        ? 'Offline'
+        : elsewhere ? `${member.where} — a different level` : member.where || '';
+    li.append(where);
+    list.append(li);
+  }
+  box.append(list);
+
+  const row = document.createElement('div');
+  row.className = 'party-actions';
+  const leave = document.createElement('button');
+  leave.className = 'small';
+  leave.textContent = 'Leave party';
+  leave.addEventListener('click', () => actions.party('leave'));
+  row.append(leave);
+  if (party.leaderId === state.playerId) {
+    const disband = document.createElement('button');
+    disband.className = 'small quiet';
+    disband.textContent = 'Disband';
+    disband.addEventListener('click', () => actions.party('disband'));
+    row.append(disband);
+  }
+  box.append(row);
+  host.append(box);
 }
 
 // -------------------------------------------------------------- settings

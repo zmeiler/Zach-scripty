@@ -10,6 +10,7 @@
 import {
   BANK_SIZE,
   COMBAT_TIMEOUT_TICKS,
+  PARTY_SIZE,
   PLANE_COUNT,
   SURFACE,
   HP_REGEN_TICKS,
@@ -68,6 +69,7 @@ import {
   startQuest
 } from './questlog.js';
 import { chooseOption, entryNode, getNode, nodeEffects, presentNode } from './dialogueRunner.js';
+import { PartyRegistry } from './party.js';
 
 export const EMOTES = ['wave', 'cheer', 'dance', 'bow', 'think', 'laugh'];
 
@@ -99,6 +101,7 @@ export class Game {
     this.groundItems = new Map();
     this.dynamicObjects = new Map();
     this.shopStock = new Map();
+    this.parties = new PartyRegistry({ maxSize: PARTY_SIZE });
     this.outbox = [];
     this.nextId = 1;
     this.spawnNpcs();
@@ -274,7 +277,9 @@ export class Game {
     const player = this.players.get(id);
     if (!player) return null;
     if (player.trade) this.cancelTrade(player, 'Your trading partner left.');
+    const left = this.parties.forget(id);
     this.players.delete(id);
+    if (left && left.ok) this.announceParty(left, player, 'has gone offline.');
     this.broadcastNear(player.x, player.y, player.plane, 'msg', { text: `${player.name} has left Emberfall.`, channel: 'system' }, id);
     return this.serializePlayer(player);
   }
@@ -351,7 +356,9 @@ export class Game {
   handle(playerId, msg) {
     const player = this.players.get(playerId);
     if (!player || !msg || typeof msg.t !== 'string') return;
-    if (player.dead && !['chat', 'emote', 'style'].includes(msg.t)) return;
+    // Party bookkeeping stays available while knocked out - there is no reason
+    // being unconscious should stop you answering an invitation.
+    if (player.dead && !['chat', 'emote', 'style', 'party'].includes(msg.t)) return;
 
     switch (msg.t) {
       case 'move': return this.cmdMove(player, msg);
@@ -367,6 +374,7 @@ export class Game {
       case 'bank': return this.cmdBank(player, msg);
       case 'craft': return this.cmdCraft(player, msg);
       case 'trade': return this.cmdTrade(player, msg);
+      case 'party': return this.cmdParty(player, msg);
       case 'closeUI': return this.closeInterfaces(player);
       case 'appearance': return this.cmdAppearance(player, msg);
       default: return undefined;
@@ -440,6 +448,10 @@ export class Game {
   cmdChat(player, msg) {
     const raw = String(msg.text || '').slice(0, MAX_CHAT_LENGTH).trim();
     if (!raw) return;
+    if (msg.channel === 'party') {
+      this.partyChat(player, raw);
+      return;
+    }
     const text = filterChat(raw);
     player.chat = { text, ticks: CHAT_TICKS };
     this.broadcastNear(player.x, player.y, player.plane, 'chat', { id: player.id, name: player.name, text });
@@ -1573,6 +1585,191 @@ export class Game {
 
   // ------------------------------------------------------------------- trade
 
+  // ------------------------------------------------------------------ party
+
+  /**
+   * Party commands. Everything here is membership only - no combat, loot or
+   * quest behaviour changes with a party yet, and none of it is wired to
+   * anything that could be exploited by grouping up.
+   */
+  cmdParty(player, msg) {
+    const op = String(msg.op || '');
+    const targetId = msg.id ? String(msg.id) : null;
+    const partyId = msg.party ? String(msg.party) : null;
+
+    switch (op) {
+      case 'invite': {
+        const other = targetId ? this.players.get(targetId) : this.playerByName(msg.name);
+        if (!other || other.id === player.id) return;
+        const result = this.parties.invite(player.id, other.id);
+        if (!result.ok) {
+          this.message(player.id, result.reason);
+          return;
+        }
+        this.message(player.id, `You invite ${other.name} to your party.`);
+        this.message(other.id, `${player.name} has invited you to a party. Answer in the People panel.`, 'system');
+        this.sendPartyTo(other);
+        this.broadcastParty(result.party);
+        return;
+      }
+      case 'accept': {
+        const result = this.parties.accept(player.id, partyId);
+        if (!result.ok) {
+          this.message(player.id, result.reason);
+          this.sendPartyTo(player);
+          return;
+        }
+        this.partySay(result.party, `${player.name} has joined the party.`);
+        this.broadcastParty(result.party);
+        return;
+      }
+      case 'decline': {
+        const result = this.parties.decline(player.id, partyId);
+        if (result.ok && result.declined) {
+          const inviter = this.players.get(result.declined.fromId);
+          if (inviter) this.message(inviter.id, `${player.name} declined your invitation.`);
+        }
+        this.sendPartyTo(player);
+        return;
+      }
+      case 'leave': {
+        const result = this.parties.leave(player.id);
+        if (!result.ok) {
+          this.message(player.id, result.reason);
+          return;
+        }
+        this.message(player.id, 'You leave the party.');
+        this.announceParty(result, player, 'has left the party.');
+        // The person who left needs their own panel cleared; `announceParty`
+        // only reaches whoever is still in the party.
+        this.sendPartyTo(player);
+        return;
+      }
+      case 'remove': {
+        const target = targetId ? this.players.get(targetId) : null;
+        if (!target) return;
+        const result = this.parties.remove(player.id, target.id);
+        if (!result.ok) {
+          this.message(player.id, result.reason);
+          return;
+        }
+        this.message(target.id, 'You have been removed from the party.', 'system');
+        this.announceParty(result, target, 'was removed from the party.');
+        this.sendPartyTo(target);
+        return;
+      }
+      case 'disband': {
+        const result = this.parties.disband(player.id);
+        if (!result.ok) {
+          this.message(player.id, result.reason);
+          return;
+        }
+        for (const id of result.members) {
+          this.message(id, 'The party has been disbanded.', 'system');
+          const member = this.players.get(id);
+          if (member) this.sendPartyTo(member);
+        }
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  playerByName(name) {
+    const wanted = String(name || '').trim().toLowerCase();
+    if (!wanted) return null;
+    for (const player of this.players.values()) {
+      if (player.name.toLowerCase() === wanted) return player;
+    }
+    return null;
+  }
+
+  /** Tells whoever is left what happened, and refreshes everyone's panel. */
+  announceParty(result, about, what) {
+    if (result.disbanded) {
+      const alone = result.wasAlone && this.players.get(result.wasAlone);
+      if (alone) this.message(alone.id, `${about.name} ${what} The party has disbanded.`, 'system');
+      if (alone) this.sendPartyTo(alone);
+      return;
+    }
+    this.partySay(result.party, `${about.name} ${what}`);
+    if (result.promoted) {
+      const leader = this.players.get(result.promoted);
+      if (leader) this.partySay(result.party, `${leader.name} is now the party leader.`);
+    }
+    this.broadcastParty(result.party);
+  }
+
+  /** A system line to every member of a party, wherever in the world they are. */
+  partySay(party, text) {
+    if (!party) return;
+    for (const id of party.members) this.message(id, text, 'party');
+  }
+
+  /**
+   * Party chat. Unlike public chat this ignores distance and planes entirely -
+   * being able to talk to someone who has just climbed a ladder is most of the
+   * point of being in a party.
+   */
+  partyChat(player, text) {
+    const party = this.parties.partyOf(player.id);
+    if (!party) {
+      this.message(player.id, 'You are not in a party.');
+      return false;
+    }
+    const clean = filterChat(String(text || '').slice(0, MAX_CHAT_LENGTH).trim());
+    if (!clean) return false;
+    for (const id of party.members) {
+      this.send(id, 'chat', { id: player.id, name: player.name, text: clean, channel: 'party' });
+    }
+    return true;
+  }
+
+  /** The party block a given player should see, or null when they have none. */
+  partyView(player) {
+    const party = this.parties.partyOf(player.id);
+    if (!party) return null;
+    return {
+      id: party.id,
+      leaderId: party.leaderId,
+      members: party.members.map((id) => {
+        const member = this.players.get(id);
+        if (!member) return { id, name: 'Adventurer', offline: true };
+        return {
+          id,
+          name: member.name,
+          level: combatLevel(member.skills),
+          hp: member.hp,
+          maxHp: this.maxHp(member),
+          plane: member.plane,
+          where: regionAt(this.world, member.x, member.y, member.plane).name,
+          dead: member.dead
+        };
+      })
+    };
+  }
+
+  partyInvitesFor(player) {
+    return this.parties.pendingFor(player.id).map((entry) => {
+      const from = this.players.get(entry.fromId);
+      return { party: entry.partyId, fromId: entry.fromId, from: from ? from.name : 'Somebody' };
+    });
+  }
+
+  sendPartyTo(player) {
+    if (!player) return;
+    this.send(player.id, 'party', {
+      party: this.partyView(player),
+      invites: this.partyInvitesFor(player)
+    });
+  }
+
+  broadcastParty(party) {
+    if (!party) return;
+    for (const id of party.members) this.sendPartyTo(this.players.get(id));
+  }
+
   requestTrade(player, other) {
     if (player.trade || other.trade) {
       this.message(player.id, 'Somebody is already trading.');
@@ -1738,8 +1935,14 @@ export class Game {
     this.tickObjects();
     this.tickGroundItems();
     if (this.tickCount % 50 === 0) this.restockShops();
+    if (this.tickCount % 10 === 0) this.parties.sweep();
 
     for (const player of this.players.values()) this.sendState(player);
+    // Only players who are actually grouped pay for the party panel refresh.
+    for (const player of this.players.values()) {
+      const party = this.parties.partyOf(player.id);
+      if (party && party.size > 1) this.sendPartyTo(player);
+    }
     for (const player of this.players.values()) player.splats.length = 0;
     return this.tickCount;
   }
@@ -1890,6 +2093,7 @@ export class Game {
     this.sendInventory(player);
     this.sendSkills(player);
     this.sendQuests(player);
+    this.sendPartyTo(player);
   }
 
   sendInventory(player) {

@@ -39,7 +39,10 @@ export const LIMITS = Object.freeze({
   /** Players are disconnected after this long with no command at all. */
   idleTimeoutMs: num('DM_IDLE_TIMEOUT', 30 * 60_000),
   /** Reports one player may file per hour. */
-  reportsPerHour: num('DM_REPORTS_PER_HOUR', 10)
+  reportsPerHour: num('DM_REPORTS_PER_HOUR', 10),
+  /** Party invitations one player may send per minute. An invite is a prompt
+   *  on somebody else's screen, so it is a harassment vector like any other. */
+  partyInvitesPerMinute: num('DM_PARTY_INVITES_PER_MIN', 6)
 });
 
 function num(name, fallback) {

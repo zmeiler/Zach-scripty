@@ -26,8 +26,8 @@ export const actions = {
   unequip(slot) {
     send({ t: 'unequip', slot });
   },
-  chat(text) {
-    send({ t: 'chat', text });
+  chat(text, channel = 'public') {
+    send({ t: 'chat', text, channel });
   },
   emote(id) {
     send({ t: 'emote', id });
@@ -55,6 +55,9 @@ export const actions = {
   },
   trade(op, payload = {}) {
     send({ t: 'trade', op, ...payload });
+  },
+  party(op, payload = {}) {
+    send({ t: 'party', op, ...payload });
   },
   closeWindow() {
     send({ t: 'closeUI' });

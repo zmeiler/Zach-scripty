@@ -163,6 +163,7 @@
 
       <section class="panel" id="panel-social" role="tabpanel" aria-label="Players nearby" hidden>
         <header class="panel-head"><h2>Nearby</h2><span id="onlineCount" class="muted">-</span></header>
+        <div id="partyBox"></div>
         <ul class="player-list" id="playerList"></ul>
         <div class="emote-row" id="emoteRow"></div>
       </section>
@@ -179,6 +180,7 @@
       <button class="chip active" data-channel="all" role="tab" aria-selected="true">All</button>
       <button class="chip" data-channel="game" role="tab" aria-selected="false">Game</button>
       <button class="chip" data-channel="public" role="tab" aria-selected="false">Players</button>
+      <button class="chip" data-channel="party" role="tab" aria-selected="false">Party</button>
       <button class="chip" data-channel="system" role="tab" aria-selected="false">System</button>
     </div>
     <div class="chat-log" id="chatLog" role="log" aria-live="polite" aria-relevant="additions"></div>

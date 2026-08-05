@@ -1,6 +1,10 @@
 /**
- * Chat log and entry box. Messages arrive on four channels (game, public,
- * system, private) and the chips filter the log without losing history.
+ * Chat log and entry box. Messages arrive on five channels (game, public,
+ * system, private, party) and the chips filter the log without losing history.
+ *
+ * The Party chip does double duty: while it is selected, what you type goes to
+ * your party rather than to everyone nearby, which is the behaviour people
+ * expect from a channel tab. `/p something` works from any tab.
  */
 
 import { actions } from '../actions.js';
@@ -28,7 +32,7 @@ export function initChat() {
   formEl.addEventListener('submit', (event) => {
     event.preventDefault();
     const text = inputEl.value.trim();
-    if (text) actions.chat(text);
+    if (text) actions.chat(...routeChat(text));
     inputEl.value = '';
     inputEl.blur();
   });
@@ -46,6 +50,17 @@ export function focusChat() {
 
 export function isChatFocused() {
   return document.activeElement === inputEl;
+}
+
+/**
+ * Decides which channel a typed line belongs to. `/p ` always means party;
+ * otherwise the selected tab decides, and everything else is public.
+ */
+function routeChat(text) {
+  const prefixed = /^\/p\s+(.+)$/i.exec(text);
+  if (prefixed) return [prefixed[1], 'party'];
+  if (state.settings.chatFilter === 'party') return [text, 'party'];
+  return [text, 'public'];
 }
 
 function matchesFilter(entry) {

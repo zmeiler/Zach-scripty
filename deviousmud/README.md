@@ -47,6 +47,7 @@ npm start          # http://localhost:8080
 | All actions menu | Right click | Long press |
 | Chat | `Enter`, type, `Enter` | 💬 button |
 | Panels | `I` bag · `E` worn · `K` skills · `Q` quests · `P` people · `O` options | Tab bar / 📋 button |
+| Party chat | `/p your message`, or pick the Party tab and type | Party tab |
 | Toggle run | `R`, or click the green orb | 🏃 button |
 | Close menu or window | `Esc` | Tap outside |
 | Zoom | Options → Zoom | Pinch |
@@ -218,6 +219,30 @@ talk to, the title screen offers solo play; multiplayer needs the Node server.
 
 ---
 
+## Playing together
+
+Open the **People** panel and press **Invite** beside somebody's name, or
+right-click them in the world. An invitation is a prompt — nothing happens to
+the other person until they press Join.
+
+* Up to five in a party. The leader (★) invites and can remove people; anyone
+  can leave.
+* The panel shows each member's health and where they are, including *which
+  level of the mine* they are on.
+* **Party chat**: `/p your message` from anywhere, or select the Party tab and
+  just type. It reaches the whole party wherever they are — a floor between you
+  is not a reason to lose contact.
+* If the leader leaves, the badge passes to whoever has been there longest. A
+  party that drops to one person disbands itself.
+
+Parties are transient: they are not saved with a character and do not survive a
+server restart.
+
+*Grouping up does not yet change combat, loot or quest credit — that is the next
+phase of work. See `docs/GROUP_PLAY.md`.*
+
+---
+
 ## Safety and moderation
 
 DeviousMud is built to be readable over a child's shoulder, and to be
@@ -284,6 +309,7 @@ All are environment variables, with defaults suited to a small friendly server.
 | Chat messages per ten seconds | `DM_CHAT_PER_10S` | 8 |
 | Idle disconnect | `DM_IDLE_TIMEOUT` | 30 min |
 | Reports per player per hour | `DM_REPORTS_PER_HOUR` | 10 |
+| Party invitations per player per minute | `DM_PARTY_INVITES_PER_MIN` | 6 |
 
 Failed logins back off exponentially, keyed by **both** address and account
 name, so neither "one password against many accounts" nor "many passwords
@@ -299,7 +325,7 @@ with a per-account salt.
 npm test
 ```
 
-100 tests cover world generation and reachability, pathfinding, the experience
+133 tests cover world generation and reachability, pathfinding, the experience
 curve, inventory rules, combat maths, quest progression, shops, banking, trading,
 chat filtering, the isometric projection, the moderation and abuse limits, the
 mine's four planes (each one proved connected by flood fill, and proved sealed

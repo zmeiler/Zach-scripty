@@ -67,6 +67,8 @@ export const state = {
 
   self: { x: 48, y: 52, plane: 0, hp: 10, maxHp: 10, energy: 100, run: true, style: 'accurate', region: '', dead: false },
   plane: { plane: 0, id: 'surface', name: 'Emberfall', dark: 0, ambient: '#0a0f14' },
+  party: null,
+  partyInvites: [],
   players: new Map(),
   npcs: new Map(),
   groundItems: new Map(),
@@ -123,6 +125,12 @@ export function applyMessage(msg) {
     // Sent the instant a ladder is used, ahead of the state message, so the
     // renderer can swap planes and snap the camera in the same frame rather
     // than easing across half the map.
+    case 'party':
+      state.party = msg.party || null;
+      state.partyInvites = msg.invites || [];
+      bus.emit('party', msg);
+      break;
+
     case 'plane':
       state.plane = msg;
       state.self.plane = msg.plane;
@@ -213,8 +221,10 @@ export function applyMessage(msg) {
       break;
 
     case 'chat':
-      pushChat({ channel: 'public', who: msg.name, text: msg.text, id: msg.id, at: Date.now() });
-      bus.emit('bubble', msg);
+      pushChat({ channel: msg.channel || 'public', who: msg.name, text: msg.text, id: msg.id, at: Date.now() });
+      // Party chat carries across the whole world, so it must not put a speech
+      // bubble over somebody standing three planes away.
+      if ((msg.channel || 'public') === 'public') bus.emit('bubble', msg);
       break;
 
     case 'dialogue':

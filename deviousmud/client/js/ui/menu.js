@@ -45,8 +45,10 @@ export function worldActions(pick) {
     }
     case 'player': {
       const player = pick.entity;
+      const inParty = state.party?.members.some((member) => member.id === player.id);
       return [
         { label: `Follow ${player.name || 'player'}`, run: () => actions.interact('player', player.id, 'follow') },
+        ...(inParty ? [] : [{ label: `Invite ${player.name || 'player'} to party`, run: () => actions.party('invite', { id: player.id }) }]),
         { label: `Trade with ${player.name || 'player'}`, run: () => actions.interact('player', player.id, 'trade') },
         { label: `Examine ${player.name || 'player'}`, run: () => actions.interact('player', player.id, 'examine') },
         { label: `Report ${player.name || 'player'}`, run: () => openReportWindow(player.name || 'Adventurer') },

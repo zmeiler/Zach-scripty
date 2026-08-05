@@ -426,6 +426,41 @@ h1 {
 .chat-log .c-system { color: var(--accent); }
 .chat-log .c-public { color: #bfe6ff; }
 .chat-log .c-public .who { color: var(--info); font-weight: 700; }
+.chat-log .c-party { color: #9ce8b0; }
+.chat-log .c-party .who { color: #58c26f; font-weight: 700; }
+
+/* ------------------------------------------------------------- party */
+.party-box {
+  background: var(--bg-panel);
+  border: 1px solid var(--good);
+  border-radius: 8px;
+  padding: 0.55rem 0.6rem;
+  margin-bottom: 0.75rem;
+}
+.party-box h3 { margin: 0 0 0.45rem; font-size: 0.9rem; display: flex; justify-content: space-between; gap: 0.5rem; }
+.party-box h3 .count { color: var(--ink-dim); font-weight: 400; font-size: 0.8rem; }
+.party-members { list-style: none; margin: 0 0 0.5rem; padding: 0; display: grid; gap: 6px; }
+.party-member { display: grid; grid-template-columns: 1fr auto; gap: 3px 0.5rem; align-items: center; font-size: 0.85rem; }
+.party-member .who { display: flex; align-items: center; gap: 0.3rem; min-width: 0; }
+.party-member .who span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.party-member .crown { color: var(--accent); }
+.party-member .where { grid-column: 1 / -1; font-size: 0.72rem; color: var(--ink-dim); }
+.party-member .where.away { color: var(--accent); }
+.party-hp { grid-column: 1 / -1; height: 4px; background: #16202b; border-radius: 999px; overflow: hidden; }
+.party-hp span { display: block; height: 100%; background: var(--good); }
+.party-hp.hurt span { background: var(--accent); }
+.party-hp.low span { background: var(--bad); }
+.party-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+.party-invite {
+  background: var(--bg-panel);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 0.55rem 0.6rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.85rem;
+}
+.party-invite p { margin: 0 0 0.45rem; }
+.party-invite .party-actions button { flex: 1 1 auto; }
 .chat-entry { display: flex; gap: 6px; padding: 6px; border-top: 1px solid var(--line); }
 .chat-entry input { flex: 1; min-height: 38px; }
 

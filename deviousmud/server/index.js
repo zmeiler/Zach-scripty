@@ -48,6 +48,7 @@ const chatGuard = new ChatGuard();
 const connections = new ConnectionLimiter();
 const loginThrottle = new LoginThrottle();
 const registrations = new SlidingWindow(60 * 60_000, LIMITS.registrationsPerHour);
+const inviteLimit = new SlidingWindow(60_000, LIMITS.partyInvitesPerMinute);
 
 /** connectionId -> { conn, playerId, name, isGuest, commandBudget } */
 const sessions = new Map();
@@ -175,6 +176,10 @@ function handleConnection(conn) {
     if (msg.t === 'chat') {
       if (!handleChat(session, msg)) return;
     }
+    if (msg.t === 'party' && msg.op === 'invite' && !inviteLimit.hit(session.name)) {
+      reply(session, 'You are sending invitations very quickly. Give people a moment to answer.');
+      return;
+    }
     game.handle(session.playerId, msg);
     flushOutbox();
   });
@@ -240,7 +245,7 @@ function handleChat(session, msg) {
     return false;
   }
 
-  moderation.noteChat(session.name, text);
+  moderation.noteChat(session.name, text, msg.channel === 'party' ? 'party' : 'public');
   return true;
 }
 
@@ -469,6 +474,7 @@ function sweep() {
   moderation.prune(now);
   loginThrottle.sweep(now);
   registrations.sweep(now);
+  inviteLimit.sweep(now);
 }
 
 async function start() {

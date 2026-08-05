@@ -123,4 +123,17 @@ export const INTERACT = {
   GROUND_ITEM: 'ground_item'
 };
 
-export const CHAT_CHANNELS = ['game', 'public', 'private', 'system'];
+export const CHAT_CHANNELS = ['game', 'public', 'private', 'party', 'system'];
+
+/**
+ * Group play. A party is transient - it lives in memory, is never saved with a
+ * character, and does not survive a server restart. Five is small enough that
+ * everyone fits in a panel without scrolling and large enough for the boss.
+ */
+export const PARTY_SIZE = 5;
+
+/** How long an unanswered party invite stands before it lapses. */
+export const PARTY_INVITE_TTL_MS = 60_000;
+
+/** Invites waiting for one player at once, so a popular player is not buried. */
+export const PARTY_MAX_PENDING = 3;
